@@ -1,0 +1,106 @@
+# ============================================================
+# Secrets and local environment
+# ============================================================
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Firebase/server credentials
+**/firebase-adminsdk*.json
+**/service-account*.json
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Signing keys and certificates
+**/key.properties
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pem
+**/*.key
+
+# ============================================================
+# Flutter / Dart
+# ============================================================
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub/
+**/.pub-cache/
+**/build/
+**/coverage/
+**/doc/api/
+**/.metadata.tmp
+
+# Generated platform files
+**/android/local.properties
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Pods/
+**/macos/.symlinks/
+**/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+
+# Flutter symbols and obfuscation maps
+**/app.*.symbols
+**/app.*.map.json
+
+# ============================================================
+# Go
+# ============================================================
+**/bin/
+**/tmp/
+**/vendor/
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Locally compiled binaries
+Backend/server
+Backend/server.exe
+
+# ============================================================
+# Local databases, dumps, logs, and caches
+# ============================================================
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+*.log
+*.tmp
+*.cache
+
+# ============================================================
+# IDE, OS, and local agent files
+# ============================================================
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.agents/
+.codex/
