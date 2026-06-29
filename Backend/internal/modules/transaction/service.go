@@ -1,12 +1,14 @@
 package transaction
 
 import (
+	"bank-service/internal/config"
 	"bank-service/internal/infrastructure/firebase"
 	"bank-service/internal/modules/account"
 	"bank-service/internal/modules/notification"
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,13 +18,20 @@ type Service struct {
 	repo           *Repository
 	firebaseClient *firebase.Client
 	notiService    *notification.Service
+	cfg            *config.Config
 }
 
-func NewService(repo *Repository, firebaseClient *firebase.Client, notiService *notification.Service) *Service {
+func NewService(
+	repo *Repository,
+	firebaseClient *firebase.Client,
+	notiService *notification.Service,
+	cfg *config.Config,
+) *Service {
 	return &Service{
 		repo:           repo,
 		firebaseClient: firebaseClient,
 		notiService:    notiService,
+		cfg:            cfg,
 	}
 }
 
@@ -30,26 +39,58 @@ func (s *Service) Transfer(
 	userID uint,
 	req TransferRequest,
 ) (*TransactionResponse, error) {
+	req.ReceiverAccountNumber = strings.TrimSpace(req.ReceiverAccountNumber)
+	req.Description = strings.TrimSpace(req.Description)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 
-	if req.IDToken == "" {
-		return nil, errors.New("giao dịch chuyển tiền yêu cầu xác thực OTP")
+	if req.Description == "" {
+		senderName, err := s.repo.GetUserFullName(userID)
+		if err != nil {
+			return nil, errors.New("không thể lấy tên người chuyển khoản")
+		}
+		req.Description = defaultTransferDescription(senderName)
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9._:-]{16,64}$`).MatchString(req.IdempotencyKey) {
+		return nil, errors.New("thiếu hoặc sai định dạng Idempotency-Key")
+	}
+	if len([]rune(req.Description)) > 140 {
+		return nil, errors.New("nội dung chuyển tiền tối đa 140 ký tự")
+	}
+	if req.Amount < s.cfg.TransferMinAmount {
+		return nil, fmt.Errorf("số tiền chuyển tối thiểu là %d VND", s.cfg.TransferMinAmount)
+	}
+	if req.Amount > s.cfg.TransferMaxAmount {
+		return nil, fmt.Errorf("số tiền vượt hạn mức mỗi giao dịch %d VND", s.cfg.TransferMaxAmount)
 	}
 
-	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
+	existing, err := s.repo.FindTransactionByIdempotencyKey(userID, req.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
-
-	userPhone, err := s.repo.GetUserPhone(userID)
-	if err != nil {
-		return nil, errors.New("không thể xác thực thông tin số điện thoại của người dùng")
+	if existing != nil {
+		return mapTransactionResponse(existing), nil
 	}
 
-	if normalizePhone(verifiedPhone) != normalizePhone(userPhone) {
-		return nil, errors.New("số điện thoại xác thực OTP không trùng khớp với số điện thoại đăng ký tài khoản")
+	if s.cfg.ServerMode == "production" && req.IDToken == "" {
+		return nil, errors.New("giao dịch chuyển tiền yêu cầu xác thực OTP")
+	}
+	if req.IDToken != "" {
+		verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
+		if err != nil {
+			return nil, err
+		}
+		userPhone, err := s.repo.GetUserPhone(userID)
+		if err != nil {
+			return nil, errors.New("không thể xác thực thông tin số điện thoại của người dùng")
+		}
+		if normalizePhone(verifiedPhone) != normalizePhone(userPhone) {
+			return nil, errors.New("số điện thoại xác thực OTP không trùng khớp với số điện thoại đăng ký tài khoản")
+		}
 	}
 
 	var transactionResult *Transaction
+	var senderUserID, receiverUserID uint
+	var senderPushMessage, receiverPushMessage string
 
 	err = s.repo.WithTx(func(tx *gorm.DB) error {
 		// 1. Tìm sender account (chưa lock) để lấy ID
@@ -121,6 +162,21 @@ func (s *Service) Transfer(
 			return errors.New("số dư không đủ")
 		}
 
+		now := time.Now()
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		usedToday, err := s.repo.SumSuccessfulOutgoingTransfers(
+			tx,
+			lockedSender.ID,
+			startOfDay,
+			startOfDay.AddDate(0, 0, 1),
+		)
+		if err != nil {
+			return err
+		}
+		if usedToday+req.Amount > s.cfg.DailyTransferLimit {
+			return fmt.Errorf("giao dịch vượt hạn mức chuyển tiền trong ngày %d VND", s.cfg.DailyTransferLimit)
+		}
+
 		senderNewBalance := lockedSender.Balance - req.Amount
 		receiverNewBalance := lockedReceiver.Balance + req.Amount
 
@@ -141,8 +197,12 @@ func (s *Service) Transfer(
 		}
 
 		senderID := lockedSender.ID
+		initiatorUserID := userID
+		idempotencyKey := req.IdempotencyKey
 		newTransaction := &Transaction{
 			ReferenceCode:     generateReferenceCode(),
+			InitiatorUserID:   &initiatorUserID,
+			IdempotencyKey:    &idempotencyKey,
 			SenderAccountID:   &senderID,
 			ReceiverAccountID: lockedReceiver.ID,
 			Amount:            req.Amount,
@@ -153,6 +213,18 @@ func (s *Service) Transfer(
 		}
 
 		if err := s.repo.CreateTransaction(tx, newTransaction); err != nil {
+			return err
+		}
+		if err := CreateDoubleEntry(
+			tx,
+			newTransaction.ID,
+			lockedSender.ID,
+			lockedReceiver.ID,
+			req.Amount,
+			lockedSender.Currency,
+			senderNewBalance,
+			receiverNewBalance,
+		); err != nil {
 			return err
 		}
 
@@ -169,14 +241,43 @@ func (s *Service) Transfer(
 		}
 
 		transactionResult = newTransaction
+		senderUserID = lockedSender.UserID
+		receiverUserID = lockedReceiver.UserID
+		senderPushMessage = senderMsg
+		receiverPushMessage = receiverMsg
 
 		return nil
 	})
 
 	if err != nil {
+		existing, findErr := s.repo.FindTransactionByIdempotencyKey(userID, req.IdempotencyKey)
+		if findErr == nil && existing != nil {
+			return mapTransactionResponse(existing), nil
+		}
 		return nil, err
 	}
 
+	pushData := map[string]string{
+		"type":           "BALANCE_FLUCTUATION",
+		"reference_code": transactionResult.ReferenceCode,
+	}
+	_ = s.notiService.SendPushToUser(
+		senderUserID,
+		"Biến động số dư (-)",
+		senderPushMessage,
+		pushData,
+	)
+	_ = s.notiService.SendPushToUser(
+		receiverUserID,
+		"Biến động số dư (+)",
+		receiverPushMessage,
+		pushData,
+	)
+
+	return mapTransactionResponse(transactionResult), nil
+}
+
+func mapTransactionResponse(transactionResult *Transaction) *TransactionResponse {
 	return &TransactionResponse{
 		ID:                transactionResult.ID,
 		ReferenceCode:     transactionResult.ReferenceCode,
@@ -187,7 +288,35 @@ func (s *Service) Transfer(
 		Type:              transactionResult.Type,
 		Status:            transactionResult.Status,
 		Description:       transactionResult.Description,
-	}, nil
+		CreatedAt:         transactionResult.CreatedAt,
+	}
+}
+
+func (s *Service) ResolveAccount(
+	userID uint,
+	accountNumber string,
+) (*AccountResolutionResponse, error) {
+	accountNumber = strings.TrimSpace(accountNumber)
+	if !regexp.MustCompile(`^[0-9]{12}$`).MatchString(accountNumber) {
+		return nil, errors.New("số tài khoản phải gồm 12 chữ số")
+	}
+
+	ownAccount, err := s.repo.FindPaymentAccountByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if ownAccount != nil && ownAccount.AccountNumber == accountNumber {
+		return nil, errors.New("không thể chuyển tiền cho chính tài khoản của mình")
+	}
+
+	result, err := s.repo.ResolveActivePaymentAccount(accountNumber)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, errors.New("không tìm thấy tài khoản nhận đang hoạt động")
+	}
+	return result, nil
 }
 
 func generateReferenceCode() string {
@@ -207,7 +336,7 @@ func (s *Service) GetMyTransactions(
 		return nil, errors.New("không tìm thấy tài khoản PAYMENT")
 	}
 
-	transactions, err := s.repo.FindTransactionsByAccountID(paymentAccount.ID)
+	transactions, err := s.repo.FindTransactionViewsByAccountID(paymentAccount.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,17 +344,7 @@ func (s *Service) GetMyTransactions(
 	response := make([]TransactionResponse, 0)
 
 	for _, transaction := range transactions {
-		response = append(response, TransactionResponse{
-			ID:                transaction.ID,
-			ReferenceCode:     transaction.ReferenceCode,
-			SenderAccountID:   transaction.SenderAccountID,
-			ReceiverAccountID: transaction.ReceiverAccountID,
-			Amount:            transaction.Amount,
-			Currency:          transaction.Currency,
-			Type:              transaction.Type,
-			Status:            transaction.Status,
-			Description:       transaction.Description,
-		})
+		response = append(response, mapTransactionView(transaction))
 	}
 
 	return response, nil
@@ -245,7 +364,7 @@ func (s *Service) GetTransactionDetail(
 		return nil, errors.New("không tìm thấy tài khoản PAYMENT")
 	}
 
-	transaction, err := s.repo.FindTransactionByReferenceCode(referenceCode)
+	transaction, err := s.repo.FindTransactionViewByReferenceCode(paymentAccount.ID, referenceCode)
 	if err != nil {
 		return nil, err
 	}
@@ -254,25 +373,8 @@ func (s *Service) GetTransactionDetail(
 		return nil, errors.New("không tìm thấy giao dịch")
 	}
 
-	isOwner :=
-		(transaction.SenderAccountID != nil && *transaction.SenderAccountID == paymentAccount.ID) ||
-			transaction.ReceiverAccountID == paymentAccount.ID
-
-	if !isOwner {
-		return nil, errors.New("không có quyền truy cập giao dịch này")
-	}
-
-	return &TransactionResponse{
-		ID:                transaction.ID,
-		ReferenceCode:     transaction.ReferenceCode,
-		SenderAccountID:   transaction.SenderAccountID,
-		ReceiverAccountID: transaction.ReceiverAccountID,
-		Amount:            transaction.Amount,
-		Currency:          transaction.Currency,
-		Type:              transaction.Type,
-		Status:            transaction.Status,
-		Description:       transaction.Description,
-	}, nil
+	result := mapTransactionView(*transaction)
+	return &result, nil
 }
 
 func normalizePhone(phone string) string {
@@ -389,6 +491,18 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 		if err := s.repo.CreateTransaction(tx, newTransaction); err != nil {
 			return err
 		}
+		if err := CreateDoubleEntry(
+			tx,
+			newTransaction.ID,
+			lockedAdmin.ID,
+			lockedReceiver.ID,
+			req.Amount,
+			lockedReceiver.Currency,
+			adminNewBalance,
+			receiverNewBalance,
+		); err != nil {
+			return err
+		}
 
 		// Tạo thông báo biến động số dư cho người nhận (nạp tiền)
 		receiverMsg := fmt.Sprintf("Tài khoản của bạn đã được cộng +%d VND từ giao dịch nạp tiền Admin. Số dư mới: %d VND. Nội dung: %s", req.Amount, receiverNewBalance, formattedDesc)
@@ -418,26 +532,34 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 }
 
 func (s *Service) GetTransactionsByAccountID(accountID uint) ([]TransactionResponse, error) {
-	transactions, err := s.repo.FindTransactionsByAccountID(accountID)
+	transactions, err := s.repo.FindTransactionViewsByAccountID(accountID)
 	if err != nil {
 		return nil, err
 	}
 
 	response := make([]TransactionResponse, 0)
 	for _, transaction := range transactions {
-		response = append(response, TransactionResponse{
-			ID:                transaction.ID,
-			ReferenceCode:     transaction.ReferenceCode,
-			SenderAccountID:   transaction.SenderAccountID,
-			ReceiverAccountID: transaction.ReceiverAccountID,
-			Amount:            transaction.Amount,
-			Currency:          transaction.Currency,
-			Type:              transaction.Type,
-			Status:            transaction.Status,
-			Description:       transaction.Description,
-		})
+		response = append(response, mapTransactionView(transaction))
 	}
 
 	return response, nil
 }
 
+func mapTransactionView(transaction transactionView) TransactionResponse {
+	return TransactionResponse{
+		ID:                        transaction.ID,
+		ReferenceCode:             transaction.ReferenceCode,
+		SenderAccountID:           transaction.SenderAccountID,
+		ReceiverAccountID:         transaction.ReceiverAccountID,
+		Amount:                    transaction.Amount,
+		Currency:                  transaction.Currency,
+		Type:                      transaction.Type,
+		Status:                    transaction.Status,
+		Description:               transaction.Description,
+		Direction:                 transaction.Direction,
+		CounterpartyName:          transaction.CounterpartyName,
+		CounterpartyAccountNumber: transaction.CounterpartyAccountNumber,
+		BalanceAfter:              transaction.BalanceAfter,
+		CreatedAt:                 transaction.CreatedAt,
+	}
+}

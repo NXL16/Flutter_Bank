@@ -16,6 +16,8 @@ func RegisterRoutes(
 	notiGroup.Use(middleware.AuthMiddleware(cfg))
 	{
 		notiGroup.GET("", handler.GetMyNotifications)
+		notiGroup.POST("/devices", handler.RegisterPushToken)
+		notiGroup.DELETE("/devices", handler.UnregisterPushToken)
 		notiGroup.PATCH("/:id/read", handler.MarkRead)
 		notiGroup.PATCH("/read-all", handler.MarkAllRead)
 	}

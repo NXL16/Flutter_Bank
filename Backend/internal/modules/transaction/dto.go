@@ -1,22 +1,37 @@
 package transaction
 
+import "time"
+
 type TransferRequest struct {
 	ReceiverAccountNumber string `json:"receiver_account_number" binding:"required"`
 	Amount                int64  `json:"amount" binding:"required,gt=0"`
 	Description           string `json:"description"`
 	IDToken               string `json:"id_token"`
+	IdempotencyKey        string `json:"-"`
 }
 
 type TransactionResponse struct {
-	ID                uint   `json:"id"`
-	ReferenceCode     string `json:"reference_code"`
-	SenderAccountID   *uint  `json:"sender_account_id,omitempty"`
-	ReceiverAccountID uint   `json:"receiver_account_id"`
-	Amount            int64  `json:"amount"`
-	Currency          string `json:"currency"`
-	Type              string `json:"type"`
-	Status            string `json:"status"`
-	Description       string `json:"description"`
+	ID                        uint      `json:"id"`
+	ReferenceCode             string    `json:"reference_code"`
+	SenderAccountID           *uint     `json:"sender_account_id,omitempty"`
+	ReceiverAccountID         uint      `json:"receiver_account_id"`
+	Amount                    int64     `json:"amount"`
+	Currency                  string    `json:"currency"`
+	Type                      string    `json:"type"`
+	Status                    string    `json:"status"`
+	Description               string    `json:"description"`
+	Direction                 string    `json:"direction,omitempty"`
+	CounterpartyName          string    `json:"counterparty_name,omitempty"`
+	CounterpartyAccountNumber string    `json:"counterparty_account_number,omitempty"`
+	BalanceAfter              *int64    `json:"balance_after,omitempty"`
+	CreatedAt                 time.Time `json:"created_at"`
+}
+
+type AccountResolutionResponse struct {
+	AccountNumber string `json:"account_number"`
+	AccountName   string `json:"account_name"`
+	BankName      string `json:"bank_name"`
+	Currency      string `json:"currency"`
 }
 
 type DepositRequest struct {

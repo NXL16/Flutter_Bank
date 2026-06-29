@@ -135,8 +135,8 @@ func (s *Service) ConfirmPayment(userID uint, req ConfirmPaymentRequest) (*strin
 		if normalizePhone(verifiedPhone) != normalizePhone(userPhone) {
 			return nil, errors.New("số điện thoại xác thực không khớp với tài khoản")
 		}
-	} else if req.OTP == "123456" {
-		// Cho phép bypass OTP bằng mã 123456 để kiểm thử nhanh
+	} else if s.cfg.AllowTestPaymentOTP && req.OTP == "123456" {
+		// Chỉ được bật rõ ràng trong môi trường phát triển.
 	} else {
 		return nil, errors.New("yêu cầu xác thực OTP để tiếp tục giao dịch")
 	}
@@ -240,6 +240,18 @@ func (s *Service) ConfirmPayment(userID uint, req ConfirmPaymentRequest) (*strin
 		}
 
 		if err := s.repo.CreateTransaction(tx, newTx); err != nil {
+			return err
+		}
+		if err := transaction.CreateDoubleEntry(
+			tx,
+			newTx.ID,
+			lockedUser.ID,
+			lockedMerchant.ID,
+			session.Amount,
+			lockedUser.Currency,
+			userNewBalance,
+			merchantNewBalance,
+		); err != nil {
 			return err
 		}
 

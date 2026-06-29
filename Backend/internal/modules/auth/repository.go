@@ -24,22 +24,6 @@ func (r *Repository) CreateUser(user *User) error {
 	return r.db.Create(user).Error
 }
 
-// FindUserByEmail tìm user theo email
-func (r *Repository) FindUserByEmail(email string) (*User, error) {
-	var user User
-
-	err := r.db.Where("email = ?", email).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	return &user, nil
-}
-
 // FindUserByID tìm user theo ID
 func (r *Repository) FindUserByID(id uint) (*User, error) {
 	var user User
@@ -106,6 +90,20 @@ func (r *Repository) CreateRefreshToken(
 	refreshToken *RefreshToken,
 ) error {
 	return r.db.Create(refreshToken).Error
+}
+
+func (r *Repository) FindActiveRefreshToken(tokenHash string) (*RefreshToken, error) {
+	var token RefreshToken
+	err := r.db.
+		Where("token_hash = ? AND is_revoked = ? AND expires_at > ?", tokenHash, false, time.Now()).
+		First(&token).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &token, nil
 }
 
 func (r *Repository) HasActiveSession(

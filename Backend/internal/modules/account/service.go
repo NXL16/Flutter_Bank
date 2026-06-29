@@ -182,7 +182,7 @@ func (s *Service) CreateDefaultPaymentAccount(
 		UserID:        userID,
 		AccountNumber: accountNumber,
 		AccountType:   "PAYMENT",
-		Balance:       1000000000, // Đặt sẵn 1 tỷ VND để test dễ dàng hơn
+		Balance:       0,
 		Currency:      "VND",
 		Status:        "ACTIVE",
 	}

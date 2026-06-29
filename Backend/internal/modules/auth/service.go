@@ -1,21 +1,18 @@
 package auth
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
 	"bank-service/internal/config"
-	"bank-service/internal/infrastructure/email"
 	"bank-service/internal/infrastructure/firebase"
 	jwtProvider "bank-service/internal/infrastructure/jwt"
 	"bank-service/internal/infrastructure/totp"
@@ -27,36 +24,27 @@ import (
 
 // Service cung cấp các phương thức xử lý logic liên quan đến xác thực và quản lý người dùng
 type Service struct {
-	repo               *Repository
-	otpRepo            *OTPRepository
-	verifyRegisterRepo *VerifyRegisterRepository
-	emailSender        *email.Sender
-	accountService     *account.Service
-	userService        *user.Service
-	cfg                *config.Config
-	firebaseClient     *firebase.Client
+	repo           *Repository
+	accountService *account.Service
+	userService    *user.Service
+	cfg            *config.Config
+	firebaseClient *firebase.Client
 }
 
 // NewService khởi tạo một instance của Service với các dependency cần thiết
 func NewService(
 	repo *Repository,
-	otpRepo *OTPRepository,
-	verifyRegisterRepo *VerifyRegisterRepository,
-	emailSender *email.Sender,
 	accountService *account.Service,
 	userService *user.Service,
 	cfg *config.Config,
 	firebaseClient *firebase.Client,
 ) *Service {
 	return &Service{
-		repo:               repo,
-		otpRepo:            otpRepo,
-		accountService:     accountService,
-		emailSender:        emailSender,
-		userService:        userService,
-		cfg:                cfg,
-		verifyRegisterRepo: verifyRegisterRepo,
-		firebaseClient:     firebaseClient,
+		repo:           repo,
+		accountService: accountService,
+		userService:    userService,
+		cfg:            cfg,
+		firebaseClient: firebaseClient,
 	}
 }
 
@@ -66,7 +54,6 @@ func (s *Service) Register(req RegisterRequest) error {
 		return err
 	}
 
-	existingUser, err := s.repo.FindUserByEmail(req.Email)
 	phoneToValidate := req.Phone
 	if len(req.Phone) >= 11 && req.Phone[:3] == "+84" {
 		phoneToValidate = "0" + req.Phone[3:]
@@ -83,17 +70,20 @@ func (s *Service) Register(req RegisterRequest) error {
 		formattedPhone = "+84" + phoneToValidate[1:]
 	}
 
+	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
+	if err != nil {
+		return err
+	}
+	if normalizePhone(verifiedPhone) != normalizePhone(formattedPhone) {
+		return errors.New("số điện thoại xác thực không khớp với số đăng ký")
+	}
+
 	existingPhone, err := s.repo.FindUserByPhone(formattedPhone)
 	if err != nil {
 		return err
 	}
-
 	if existingPhone != nil {
 		return errors.New("số điện thoại đã được sử dụng")
-	}
-
-	if existingUser != nil {
-		return errors.New("email đã được sử dụng")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -104,68 +94,33 @@ func (s *Service) Register(req RegisterRequest) error {
 		return err
 	}
 
-	otp, err := generateOTP()
-	if err != nil {
-		return err
-	}
-
-	otpHash, err := bcrypt.GenerateFromPassword(
-		[]byte(otp),
-		bcrypt.DefaultCost,
-	)
-	if err != nil {
-		return err
-	}
-
-	verifyRegister := &VerifyRegister{
-		Email:        req.Email,
-		FullName:     req.FullName,
+	// Cột email được giữ tạm để tương thích migration dữ liệu cũ, nhưng không
+	// còn được dùng làm định danh hay hiển thị cho khách hàng.
+	internalIdentity := fmt.Sprintf("%s@phone.identity", normalizePhone(formattedPhone))
+	user := &User{
+		Email:        internalIdentity,
+		FullName:     strings.TrimSpace(req.FullName),
 		Phone:        formattedPhone,
 		PasswordHash: string(hashedPassword),
-		OTPHash:      string(otpHash),
-		OTPChannel:   req.OTPChannel,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute),
+		Role:         "user",
+		IsVerified:   true,
+		IsLocked:     false,
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := s.verifyRegisterRepo.Create(ctx, verifyRegister); err != nil {
+	if err := s.repo.CreateUser(user); err != nil {
 		return err
 	}
-
-	// In OTP ra console để hỗ trợ test local / debug nếu email gặp sự cố
-	fmt.Printf("\n🔑 [TEST/DEBUG] Đăng ký tài khoản: %s | OTP: %s\n\n", req.Email, otp)
-
-	if err := s.emailSender.SendRegisterOTP(req.Email, otp); err != nil {
-		fmt.Printf("⚠️ Lỗi gửi Email OTP (SMTP): %v. Nhưng vẫn tiếp tục ở chế độ test (Đọc OTP từ log trên).\n", err)
+	if err := s.accountService.CreateDefaultPaymentAccount(user.ID); err != nil {
+		return err
 	}
-
-	return nil
+	return s.userService.CreateEmptyProfile(user.ID)
 }
 
 // Login xử lý đăng nhập: trả về AuthResponse chứa cờ yêu cầu OTP SMS với user thường hoặc token trực tiếp với admin/super admin
 func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, deviceID string) (*AuthResponse, error) {
-	var user *User
-	var err error
-
-	// Thử tìm theo Email/Username trước (hỗ trợ cả custom username không có ký tự @)
-	user, err = s.repo.FindUserByEmail(req.Email)
+	phoneFormatted := "+84" + normalizePhone(req.Phone)
+	user, err := s.repo.FindUserByPhone(phoneFormatted)
 	if err != nil {
 		return nil, err
-	}
-
-	// Nếu không tìm thấy và không chứa ký tự @, tiến hành tìm theo số điện thoại
-	if user == nil && !strings.Contains(req.Email, "@") {
-		phoneFormatted := normalizePhone(req.Email)
-		if len(phoneFormatted) > 0 {
-			phoneFormatted = "+84" + phoneFormatted
-			user, err = s.repo.FindUserByPhone(phoneFormatted)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	if user == nil {
@@ -202,7 +157,7 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 		// Tạo Access Token và Refresh Token ngay lập tức cho Admin/Super Admin
 		accessToken, err := jwtProvider.GenerateAccessToken(
 			user.ID,
-			user.Email,
+			user.Phone,
 			user.Role,
 			user.SessionVersion,
 			s.cfg.AccessTokenSecret,
@@ -213,7 +168,7 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 
 		refreshToken, err := jwtProvider.GenerateRefreshToken(
 			user.ID,
-			user.Email,
+			user.Phone,
 			user.Role,
 			user.SessionVersion,
 			s.cfg.RefreshTokenSecret,
@@ -246,38 +201,11 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 			User: UserResponse{
 				ID:         user.ID,
 				FullName:   user.FullName,
-				Email:      user.Email,
 				Phone:      user.Phone,
 				Role:       user.Role,
 				IsVerified: user.IsVerified,
 			},
 		}, nil
-	}
-
-	// Đối với user bình thường: tự động tạo OTP dự phòng gửi qua email và log ra console để test
-	otp, err := generateOTP()
-	if err == nil {
-		otpHash, err := bcrypt.GenerateFromPassword([]byte(otp), bcrypt.DefaultCost)
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			loginOTP := &OTP{
-				Email:     user.Email,
-				OTPHash:   string(otpHash),
-				Purpose:   "login",
-				CreatedAt: time.Now(),
-				ExpiresAt: time.Now().Add(5 * time.Minute),
-			}
-			_ = s.otpRepo.CreateOTP(ctx, loginOTP)
-
-			fmt.Printf("\n🔑 [TEST/DEBUG] OTP Đăng nhập của %s: %s\n\n", user.Email, otp)
-
-			// Gửi Email
-			if err := s.emailSender.SendLoginOTP(user.Email, otp); err != nil {
-				fmt.Printf("⚠️ Lỗi gửi Email OTP Đăng nhập: %v. Đăng nhập vẫn tiếp tục ở chế độ debug.\n", err)
-			}
-		}
 	}
 
 	return &AuthResponse{
@@ -329,6 +257,15 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 		return nil, errors.New("refresh token không hợp lệ hoặc đã hết hạn")
 	}
 
+	refreshTokenHash := sha256.Sum256([]byte(refreshToken))
+	storedToken, err := s.repo.FindActiveRefreshToken(hex.EncodeToString(refreshTokenHash[:]))
+	if err != nil {
+		return nil, err
+	}
+	if storedToken == nil || storedToken.UserID != claims.UserID {
+		return nil, errors.New("phiên đăng nhập không tồn tại hoặc đã bị thu hồi")
+	}
+
 	user, err := s.repo.FindUserByID(claims.UserID)
 	if err != nil {
 		return nil, err
@@ -341,10 +278,13 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 	if user.IsLocked {
 		return nil, errors.New("tài khoản đã bị khóa")
 	}
+	if claims.SessionVersion != user.SessionVersion {
+		return nil, errors.New("phiên đăng nhập đã hết hiệu lực")
+	}
 
 	accessToken, err := jwtProvider.GenerateAccessToken(
 		user.ID,
-		user.Email,
+		user.Phone,
 		user.Role,
 		user.SessionVersion,
 		s.cfg.AccessTokenSecret,
@@ -358,7 +298,6 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 		User: UserResponse{
 			ID:         user.ID,
 			FullName:   user.FullName,
-			Email:      user.Email,
 			Phone:      user.Phone,
 			Role:       user.Role,
 			IsVerified: user.IsVerified,
@@ -405,64 +344,11 @@ func (s *Service) ChangePassword(userID uint, req ChangePasswordRequest) error {
 		return err
 	}
 
-	return s.repo.UpdatePassword(userID, string(hashedPassword))
-}
-
-// generateOTP tạo một mã OTP ngẫu nhiên 6 chữ số
-func generateOTP() (string, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%06d", n.Int64()), nil
-}
-
-// ForgotPassword xử lý yêu cầu quên mật khẩu
-func (s *Service) ForgotPassword(req ForgotPasswordRequest) error {
-	user, err := s.repo.FindUserByEmail(req.Email)
-	if err != nil {
+	if err := s.repo.UpdatePassword(userID, string(hashedPassword)); err != nil {
 		return err
 	}
-
-	// Không leak email tồn tại hay không
-	if user == nil {
-		return nil
-	}
-
-	otp, err := generateOTP()
-	if err != nil {
-		return err
-	}
-
-	otpHash, err := bcrypt.GenerateFromPassword(
-		[]byte(otp),
-		bcrypt.DefaultCost,
-	)
-	if err != nil {
-		return err
-	}
-
-	resetOTP := &OTP{
-		UserID:    user.ID,
-		Email:     user.Email,
-		OTPHash:   string(otpHash),
-		Purpose:   "password_reset",
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(5 * time.Minute),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := s.otpRepo.CreateOTP(ctx, resetOTP); err != nil {
-		return err
-	}
-
-	if err := s.emailSender.SendResetPasswordOTP(user.Email, otp); err != nil {
-		return err
-	}
-	return nil
+	_ = s.repo.RevokeAllUserRefreshTokens(userID)
+	return s.repo.IncreaseSessionVersion(userID)
 }
 
 // ResetPassword xử lý yêu cầu đặt lại mật khẩu
@@ -471,33 +357,22 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 		return err
 	}
 
-	user, err := s.repo.FindUserByEmail(req.Email)
+	phone := "+84" + normalizePhone(req.Phone)
+	user, err := s.repo.FindUserByPhone(phone)
 	if err != nil {
 		return err
 	}
 
 	if user == nil {
-		return errors.New("otp không hợp lệ hoặc đã hết hạn")
+		return errors.New("thông tin xác thực không hợp lệ")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	resetOTP, err := s.otpRepo.FindValidOTPByEmailAndPurpose(ctx, req.Email, "password_reset")
+	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
 	if err != nil {
 		return err
 	}
-
-	if resetOTP == nil {
-		return errors.New("otp không hợp lệ hoặc đã hết hạn")
-	}
-
-	err = bcrypt.CompareHashAndPassword(
-		[]byte(resetOTP.OTPHash),
-		[]byte(req.OTP),
-	)
-	if err != nil {
-		return errors.New("otp không hợp lệ hoặc đã hết hạn")
+	if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
+		return errors.New("số điện thoại xác thực không khớp với tài khoản")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -508,89 +383,17 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 		return err
 	}
 
-	_ = s.otpRepo.DeleteOTP(ctx, resetOTP.ID)
-
-	return s.repo.UpdatePassword(user.ID, string(hashedPassword))
-}
-
-// ConfirmRegister xác thực OTP đăng ký tài khoản (hỗ trợ Firebase SMS OTP)
-func (s *Service) ConfirmRegister(req ConfirmRegisterRequest) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	verifyRegister, err := s.verifyRegisterRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
+	if err := s.repo.UpdatePassword(user.ID, string(hashedPassword)); err != nil {
 		return err
 	}
-
-	if verifyRegister == nil {
-		return errors.New("yêu cầu đăng ký không tồn tại hoặc đã hết hạn")
-	}
-
-	if req.IDToken != "" {
-		// Xác thực bằng Firebase ID Token (SĐT)
-		verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
-		if err != nil {
-			return err
-		}
-		if normalizePhone(verifiedPhone) != normalizePhone(verifyRegister.Phone) {
-			return errors.New("số điện thoại xác thực không khớp với số đăng ký")
-		}
-	} else if req.OTP != "" {
-		// Fallback cho email OTP
-		err = bcrypt.CompareHashAndPassword(
-			[]byte(verifyRegister.OTPHash),
-			[]byte(req.OTP),
-		)
-		if err != nil {
-			return errors.New("otp không hợp lệ hoặc đã hết hạn")
-		}
-	} else {
-		return errors.New("thiếu thông tin xác thực OTP hoặc ID Token")
-	}
-
-	user := &User{
-		Email:        verifyRegister.Email,
-		FullName:     verifyRegister.FullName,
-		Phone:        verifyRegister.Phone,
-		PasswordHash: verifyRegister.PasswordHash,
-		Role:         "user",
-		IsVerified:   true,
-		IsLocked:     false,
-	}
-
-	if err := s.repo.CreateUser(user); err != nil {
-		return err
-	}
-
-	if err := s.accountService.CreateDefaultPaymentAccount(user.ID); err != nil {
-		return err
-	}
-
-	if err := s.verifyRegisterRepo.Delete(ctx, verifyRegister.ID); err != nil {
-		return err
-	}
-
-	return nil
+	_ = s.repo.RevokeAllUserRefreshTokens(user.ID)
+	return s.repo.IncreaseSessionVersion(user.ID)
 }
 
 // ConfirmLogin xác thực OTP đăng nhập và cấp token (đã nâng cấp hỗ trợ Firebase SMS OTP và nhận diện thiết bị đầu tiên)
 func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddress string, deviceID string) (*AuthResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var user *User
-	var err error
-
-	if strings.Contains(req.Email, "@") {
-		user, err = s.repo.FindUserByEmail(req.Email)
-	} else {
-		phoneFormatted := normalizePhone(req.Email)
-		if len(phoneFormatted) > 0 {
-			phoneFormatted = "+84" + phoneFormatted
-		}
-		user, err = s.repo.FindUserByPhone(phoneFormatted)
-	}
+	phoneFormatted := "+84" + normalizePhone(req.Phone)
+	user, err := s.repo.FindUserByPhone(phoneFormatted)
 
 	if err != nil {
 		return nil, err
@@ -607,28 +410,12 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		return nil, errors.New("tài khoản chưa được xác thực")
 	}
 
-	if req.IDToken != "" {
-		// Xác thực bằng Firebase ID Token
-		verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
-		if err != nil {
-			return nil, err
-		}
-		if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
-			return nil, errors.New("số điện thoại xác thực không khớp với tài khoản")
-		}
-	} else if req.OTP != "" {
-		// Fallback cho email OTP
-		loginOTP, err := s.otpRepo.FindValidOTPByEmailAndPurpose(ctx, req.Email, "login")
-		if err != nil || loginOTP == nil {
-			return nil, errors.New("otp không hợp lệ hoặc đã hết hạn")
-		}
-		err = bcrypt.CompareHashAndPassword([]byte(loginOTP.OTPHash), []byte(req.OTP))
-		if err != nil {
-			return nil, errors.New("otp không hợp lệ hoặc đã hết hạn")
-		}
-		_ = s.otpRepo.DeleteOTP(ctx, loginOTP.ID)
-	} else {
-		return nil, errors.New("thiếu thông tin xác thực OTP hoặc ID Token")
+	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
+	if err != nil {
+		return nil, err
+	}
+	if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
+		return nil, errors.New("số điện thoại xác thực không khớp với tài khoản")
 	}
 
 	// 1. Tự động dọn dẹp các thiết bị tin cậy cũ quá 30 ngày của user này
@@ -672,50 +459,25 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		}
 	}
 
-	// 4. Nếu thiết bị lạ (chưa tin cậy) -> Chặn tạm thời và gửi email xác nhận tương tác
+	// OTP điện thoại vừa xác minh chính chủ, vì vậy thiết bị mới được đăng ký
+	// trực tiếp thay vì tiếp tục yêu cầu phê duyệt qua email.
 	if !isTrusted {
-		// Sinh deviceID mới nếu chưa có
 		newDeviceID := deviceID
 		if newDeviceID == "" {
 			newDeviceID = generateUUID()
 		}
-
-		// Tạo bản ghi PendingLogin
-		pendingID := generateUUID()
-		pending := &PendingLogin{
-			ID:        pendingID,
-			UserID:    user.ID,
-			DeviceID:  newDeviceID,
-			UserAgent: userAgent,
-			IPAddress: ipAddress,
-			Location:  location,
-			Status:    "PENDING",
-			ExpiresAt: time.Now().Add(15 * time.Minute),
+		device := &UserDevice{
+			UserID:         user.ID,
+			DeviceID:       newDeviceID,
+			UserAgent:      userAgent,
+			LastActiveIP:   ipAddress,
+			LastLocation:   location,
+			LastLoggedInAt: time.Now(),
 		}
-
-		if err := s.repo.CreatePendingLogin(pending); err != nil {
+		if err := s.repo.CreateUserDevice(device); err != nil {
 			return nil, err
 		}
-
-		// Gửi email chứa 2 nút hành động
-		host := s.cfg.AppURL
-		if host == "" {
-			if s.cfg.ServerPort == "" {
-				s.cfg.ServerPort = "8080"
-			}
-			host = fmt.Sprintf("http://localhost:%s", s.cfg.ServerPort)
-		}
-		confirmURL := fmt.Sprintf("%s/api/v1/auth/device-verification/confirm?token=%s", host, pendingID)
-		rejectURL := fmt.Sprintf("%s/api/v1/auth/device-verification/reject?token=%s", host, pendingID)
-
-		deviceName := parseUserAgent(userAgent)
-		_ = s.emailSender.SendNewDeviceAlert(user.Email, ipAddress, location, deviceName, confirmURL, rejectURL)
-
-		return &AuthResponse{
-			PendingVerification: true,
-			PendingID:           pendingID,
-			DeviceID:            newDeviceID,
-		}, nil
+		deviceID = newDeviceID
 	}
 
 	// 5. Nếu là thiết bị quen -> Cho phép đăng nhập bình thường
@@ -728,7 +490,7 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 
 	accessToken, err := jwtProvider.GenerateAccessToken(
 		user.ID,
-		user.Email,
+		user.Phone,
 		user.Role,
 		user.SessionVersion,
 		s.cfg.AccessTokenSecret,
@@ -739,7 +501,7 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 
 	refreshToken, err := jwtProvider.GenerateRefreshToken(
 		user.ID,
-		user.Email,
+		user.Phone,
 		user.Role,
 		user.SessionVersion,
 		s.cfg.RefreshTokenSecret,
@@ -768,82 +530,11 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		User: UserResponse{
 			ID:         user.ID,
 			FullName:   user.FullName,
-			Email:      user.Email,
 			Phone:      user.Phone,
 			Role:       user.Role,
 			IsVerified: user.IsVerified,
 		},
 	}, nil
-}
-
-// ConfirmDeviceVerification phê duyệt thiết bị từ email
-func (s *Service) ConfirmDeviceVerification(token string) error {
-	pending, err := s.repo.FindPendingLogin(token)
-	if err != nil {
-		return err
-	}
-	if pending == nil {
-		return errors.New("yêu cầu xác thực không tồn tại")
-	}
-
-	if pending.Status != "PENDING" {
-		return fmt.Errorf("yêu cầu xác thực đã được xử lý (trạng thái: %s)", pending.Status)
-	}
-
-	if time.Now().After(pending.ExpiresAt) {
-		_ = s.repo.UpdatePendingLoginStatus(token, "EXPIRED")
-		return errors.New("yêu cầu xác thực đã hết hạn (hiệu lực 15 phút)")
-	}
-
-	// 1. Phê duyệt trạng thái
-	if err := s.repo.UpdatePendingLoginStatus(token, "APPROVED"); err != nil {
-		return err
-	}
-
-	// 2. Thêm thiết bị mới vào danh sách tin cậy
-	device := &UserDevice{
-		UserID:         pending.UserID,
-		DeviceID:       pending.DeviceID,
-		UserAgent:      pending.UserAgent,
-		LastActiveIP:   pending.IPAddress,
-		LastLocation:   pending.Location,
-		LastLoggedInAt: time.Now(),
-	}
-
-	return s.repo.CreateUserDevice(device)
-}
-
-// RejectDeviceVerification từ chối thiết bị và khóa tài khoản khẩn cấp
-func (s *Service) RejectDeviceVerification(token string) error {
-	pending, err := s.repo.FindPendingLogin(token)
-	if err != nil {
-		return err
-	}
-	if pending == nil {
-		return errors.New("yêu cầu xác thực không tồn tại")
-	}
-
-	if pending.Status != "PENDING" {
-		return fmt.Errorf("yêu cầu xác thực đã được xử lý (trạng thái: %s)", pending.Status)
-	}
-
-	// 1. Cập nhật trạng thái từ chối
-	if err := s.repo.UpdatePendingLoginStatus(token, "REJECTED"); err != nil {
-		return err
-	}
-
-	// 2. Khóa tài khoản người dùng ngay lập tức
-	if err := s.repo.LockUser(pending.UserID); err != nil {
-		return err
-	}
-
-	// 3. Vô hiệu hóa toàn bộ refresh token hiện có
-	_ = s.repo.RevokeAllUserRefreshTokens(pending.UserID)
-
-	// 4. Tăng session version để lập tức logout tất cả phiên đăng nhập khác
-	_ = s.repo.IncreaseSessionVersion(pending.UserID)
-
-	return nil
 }
 
 func resolveLocation(ip string) string {

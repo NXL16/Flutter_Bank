@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -96,7 +97,7 @@ func (r *Repository) FindAccountByIDAndUserID(id, userID uint) (*account.Account
 
 func (r *Repository) FindAccountByIDForUpdate(tx *gorm.DB, id uint) (*account.Account, error) {
 	var acc account.Account
-	err := tx.Set("gorm:query_option", "FOR UPDATE").First(&acc, id).Error
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&acc, id).Error
 	if err != nil {
 		return nil, err
 	}

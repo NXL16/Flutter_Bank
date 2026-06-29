@@ -30,6 +30,7 @@ func (h *Handler) Transfer(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, "Không xác định được người dùng", nil)
 		return
 	}
+	req.IdempotencyKey = c.GetHeader("Idempotency-Key")
 
 	transaction, err := h.service.Transfer(userID, req)
 	if err != nil {
@@ -38,6 +39,21 @@ func (h *Handler) Transfer(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "Chuyển tiền thành công", transaction)
+}
+
+func (h *Handler) ResolveAccount(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "Không xác định được người dùng", nil)
+		return
+	}
+
+	result, err := h.service.ResolveAccount(userID, c.Param("account_number"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+	response.Success(c, http.StatusOK, "Xác minh tài khoản thành công", result)
 }
 
 func (h *Handler) GetMyTransactions(c *gin.Context) {

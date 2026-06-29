@@ -13,7 +13,6 @@ type Repository struct {
 type BasicUserInfo struct {
 	ID         uint
 	FullName   string
-	Email      string
 	Phone      string
 	Role       string
 	IsVerified bool
@@ -74,7 +73,7 @@ func (r *Repository) FindBasicUserInfo(userID uint) (*BasicUserInfo, error) {
 
 	err := r.db.
 		Table("users").
-		Select("id, full_name, email, phone, role, is_verified, is_locked").
+		Select("id, full_name, phone, role, is_verified, is_locked").
 		Where("id = ?", userID).
 		First(&user).Error
 

@@ -17,11 +17,10 @@ var DB *gorm.DB
 func ConnectMySQL(dsn string) {
 	var err error
 
-	// 1. Mở kết nối với GORM kèm theo cấu hình Logger
+	// Không in câu lệnh SQL ra terminal. Các lỗi kết nối/nghiệp vụ quan trọng
+	// vẫn được ghi bởi logger của ứng dụng.
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-		// LogMode(logger.Info) sẽ in ra Terminal mọi câu lệnh SQL mà GORM thực thi
-		// Giúp bạn dễ dàng debug xem code Go đang sinh ra mã SQL gì
-		Logger: logger.Default.LogMode(logger.Info), 
+		Logger: logger.Default.LogMode(logger.Silent),
 	})
 
 	if err != nil {

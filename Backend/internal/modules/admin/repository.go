@@ -42,10 +42,19 @@ func (r *Repository) FindUserByID(
 }
 
 func (r *Repository) LockUser(userID uint) error {
-	return r.db.
-		Model(&auth.User{}).
-		Where("id = ?", userID).
-		Update("is_locked", true).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&auth.User{}).
+			Where("id = ?", userID).
+			Updates(map[string]interface{}{
+				"is_locked":       true,
+				"session_version": gorm.Expr("session_version + 1"),
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&auth.RefreshToken{}).
+			Where("user_id = ? AND is_revoked = ?", userID, false).
+			Update("is_revoked", true).Error
+	})
 }
 
 func (r *Repository) UnlockUser(userID uint) error {
@@ -59,9 +68,9 @@ func (r *Repository) CreateAdminUser(user *auth.User) error {
 	return r.db.Create(user).Error
 }
 
-func (r *Repository) FindUserByEmailOrPhone(email string, phone string) (*auth.User, error) {
+func (r *Repository) FindUserByPhone(phone string) (*auth.User, error) {
 	var user auth.User
-	err := r.db.Where("email = ? OR phone = ?", email, phone).First(&user).Error
+	err := r.db.Where("phone = ?", phone).First(&user).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

@@ -51,7 +51,6 @@ func (s *Service) GetMyProfile(userID uint) (*UserProfileResponse, error) {
 	return &UserProfileResponse{
 		UserID:      basicUser.ID,
 		FullName:    basicUser.FullName,
-		Email:       basicUser.Email,
 		Phone:       basicUser.Phone,
 		Role:        basicUser.Role,
 		IsVerified:  basicUser.IsVerified,

@@ -5,7 +5,6 @@ import "time"
 type UserProfileResponse struct {
 	UserID      uint       `json:"user_id"`
 	FullName    string     `json:"full_name"`
-	Email       string     `json:"email"`
 	Phone       string     `json:"phone"`
 	Role        string     `json:"role"`
 	IsVerified  bool       `json:"is_verified"`

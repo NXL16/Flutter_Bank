@@ -1,20 +1,93 @@
 package notification
 
 import (
+	"bank-service/internal/infrastructure/firebase"
+	"context"
 	"errors"
 	"strings"
+	"time"
 
+	"firebase.google.com/go/v4/messaging"
 	"gorm.io/gorm"
 )
 
 type Service struct {
-	repo *Repository
+	repo           *Repository
+	firebaseClient *firebase.Client
 }
 
-func NewService(repo *Repository) *Service {
+func NewService(repo *Repository, firebaseClient *firebase.Client) *Service {
 	return &Service{
-		repo: repo,
+		repo:           repo,
+		firebaseClient: firebaseClient,
 	}
+}
+
+func (s *Service) RegisterPushToken(userID uint, token, platform string) error {
+	token = strings.TrimSpace(token)
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if userID == 0 || len(token) < 20 {
+		return errors.New("push token không hợp lệ")
+	}
+	if platform != "android" && platform != "ios" && platform != "web" {
+		return errors.New("nền tảng push notification không hợp lệ")
+	}
+	return s.repo.UpsertPushToken(&PushToken{
+		UserID:     userID,
+		Token:      token,
+		Platform:   platform,
+		LastSeenAt: time.Now(),
+	})
+}
+
+func (s *Service) UnregisterPushToken(userID uint, token string) error {
+	if userID == 0 || strings.TrimSpace(token) == "" {
+		return errors.New("push token không hợp lệ")
+	}
+	return s.repo.DeletePushToken(userID, strings.TrimSpace(token))
+}
+
+// SendPushToUser chạy sau khi giao dịch DB đã commit. Lỗi gửi push được trả về
+// cho logging/retry, không được dùng để đảo ngược giao dịch tài chính.
+func (s *Service) SendPushToUser(
+	userID uint,
+	title string,
+	body string,
+	data map[string]string,
+) error {
+	tokens, err := s.repo.FindPushTokensByUserID(userID)
+	if err != nil || len(tokens) == 0 {
+		return err
+	}
+
+	values := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		values = append(values, token.Token)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	result, err := s.firebaseClient.MessagingClient.SendEachForMulticast(
+		ctx,
+		&messaging.MulticastMessage{
+			Tokens: values,
+			Notification: &messaging.Notification{
+				Title: title,
+				Body:  body,
+			},
+			Data:    data,
+			Android: &messaging.AndroidConfig{Priority: "high"},
+		},
+	)
+	if err != nil {
+		return err
+	}
+	for index, response := range result.Responses {
+		if response.Error != nil && messaging.IsRegistrationTokenNotRegistered(response.Error) {
+			_ = s.repo.DeletePushTokenValue(values[index])
+		}
+	}
+	return nil
 }
 
 // CreateNotification sinh thông báo mới và lưu vào DB (MySQL)

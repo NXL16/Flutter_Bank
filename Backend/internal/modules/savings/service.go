@@ -12,6 +12,7 @@ import (
 	"bank-service/internal/modules/transaction"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -39,7 +40,7 @@ func (s *Service) OpenSavings(userID uint, req CreateSavingsRequest) (*SavingsRe
 	err := s.repo.db.Transaction(func(tx *gorm.DB) error {
 		// a. Tìm tài khoản PAYMENT của user để trừ tiền (và lock để tránh race condition)
 		var paymentAccount account.Account
-		err := tx.Set("gorm:query_option", "FOR UPDATE").
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND account_type = ?", userID, "PAYMENT").
 			First(&paymentAccount).Error
 		if err != nil {
@@ -123,6 +124,18 @@ func (s *Service) OpenSavings(userID uint, req CreateSavingsRequest) (*SavingsRe
 			Description:       desc,
 		}
 		if err := tx.Create(newTx).Error; err != nil {
+			return err
+		}
+		if err := transaction.CreateDoubleEntry(
+			tx,
+			newTx.ID,
+			paymentAccount.ID,
+			savingsAccount.ID,
+			req.Amount,
+			"VND",
+			paymentNewBalance,
+			req.Amount,
+		); err != nil {
 			return err
 		}
 

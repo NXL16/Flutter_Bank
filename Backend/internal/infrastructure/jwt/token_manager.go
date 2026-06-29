@@ -9,7 +9,7 @@ import (
 
 type CustomClaims struct {
 	UserID         uint   `json:"user_id"`
-	Email          string `json:"email"`
+	Phone          string `json:"phone"`
 	Role           string `json:"role"`
 	SessionVersion int    `json:"session_version"`
 
@@ -18,7 +18,7 @@ type CustomClaims struct {
 
 func GenerateAccessToken(
 	userID uint,
-	email string,
+	phone string,
 	role string,
 	sessionVersion int,
 	secret string,
@@ -26,13 +26,13 @@ func GenerateAccessToken(
 
 	claims := CustomClaims{
 		UserID:         userID,
-		Email:          email,
+		Phone:          phone,
 		Role:           role,
 		SessionVersion: sessionVersion,
 
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(
-				time.Now().Add(24* 60 * time.Minute),
+				time.Now().Add(15 * time.Minute),
 			),
 
 			IssuedAt: jwt.NewNumericDate(time.Now()),
@@ -57,7 +57,7 @@ func GenerateAccessToken(
 
 func GenerateRefreshToken(
 	userID uint,
-	email string,
+	phone string,
 	role string,
 	sessionVersion int,
 	secret string,
@@ -65,7 +65,7 @@ func GenerateRefreshToken(
 
 	claims := CustomClaims{
 		UserID:         userID,
-		Email:          email,
+		Phone:          phone,
 		Role:           role,
 		SessionVersion: sessionVersion,
 
@@ -103,7 +103,7 @@ func ValidateToken(
 		func(token *jwt.Token) (interface{}, error) {
 
 			// Chỉ chấp nhận HS256
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			if token.Method != jwt.SigningMethodHS256 {
 				return nil, errors.New("invalid signing method")
 			}
 

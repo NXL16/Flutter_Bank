@@ -80,7 +80,7 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		c.Set("user_id", claims.UserID)
-		c.Set("email", claims.Email)
+		c.Set("phone", claims.Phone)
 		c.Set("role", claims.Role)
 		c.Set("session_version", claims.SessionVersion)
 

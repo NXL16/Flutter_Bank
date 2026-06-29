@@ -8,12 +8,14 @@ import (
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
+	"firebase.google.com/go/v4/messaging"
 	"google.golang.org/api/option"
 )
 
 type Client struct {
-	App        *firebase.App
-	AuthClient *auth.Client
+	App             *firebase.App
+	AuthClient      *auth.Client
+	MessagingClient *messaging.Client
 }
 
 // InitFirebase khởi tạo kết nối với Firebase Admin SDK
@@ -32,11 +34,16 @@ func InitFirebase(credentialsPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lỗi khởi tạo Firebase Auth client: %v", err)
 	}
+	messagingClient, err := app.Messaging(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("lỗi khởi tạo Firebase Messaging client: %v", err)
+	}
 
 	log.Println("✅ Đã kết nối thành công Firebase Admin SDK!")
 	return &Client{
-		App:        app,
-		AuthClient: authClient,
+		App:             app,
+		AuthClient:      authClient,
+		MessagingClient: messagingClient,
 	}, nil
 }
 

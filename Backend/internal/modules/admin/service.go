@@ -48,7 +48,6 @@ func (s *Service) GetUserByID(userID uint) (*AdminUserResponse, error) {
 	return &AdminUserResponse{
 		ID:             user.ID,
 		FullName:       user.FullName,
-		Email:          user.Email,
 		Phone:          user.Phone,
 		Role:           user.Role,
 		IsVerified:     user.IsVerified,
@@ -65,8 +64,8 @@ func (s *Service) LockUser(userID uint) error {
 		return err
 	}
 
-	if user.Role == "admin" {
-		return errors.New("không thể khóa tài khoản admin")
+	if user.Role != "user" {
+		return errors.New("không thể khóa tài khoản quản trị viên")
 	}
 
 	if user.IsLocked {
@@ -93,7 +92,6 @@ func mapUserToAdminResponse(user auth.User) AdminUserResponse {
 	return AdminUserResponse{
 		ID:             user.ID,
 		FullName:       user.FullName,
-		Email:          user.Email,
 		Phone:          user.Phone,
 		Role:           user.Role,
 		IsVerified:     user.IsVerified,
@@ -123,12 +121,13 @@ func (s *Service) GetUserAccounts(
 }
 
 func (s *Service) CreateAdmin(req CreateAdminRequest) (*CreateAdminResponse, error) {
-	existingUser, err := s.repo.FindUserByEmailOrPhone(req.Email, req.Phone)
+	phone := "+84" + normalizePhone(req.Phone)
+	existingUser, err := s.repo.FindUserByPhone(phone)
 	if err != nil {
 		return nil, err
 	}
 	if existingUser != nil {
-		return nil, errors.New("email hoặc số điện thoại đã được sử dụng")
+		return nil, errors.New("số điện thoại đã được sử dụng")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -140,8 +139,8 @@ func (s *Service) CreateAdmin(req CreateAdminRequest) (*CreateAdminResponse, err
 
 	adminUser := &auth.User{
 		FullName:     req.FullName,
-		Email:        req.Email,
-		Phone:        req.Phone,
+		Email:        normalizePhone(phone) + "@phone.identity",
+		Phone:        phone,
 		PasswordHash: string(hashedPassword),
 		Role:         "admin",
 		IsVerified:   true,
@@ -160,12 +159,28 @@ func (s *Service) CreateAdmin(req CreateAdminRequest) (*CreateAdminResponse, err
 	return &CreateAdminResponse{
 		ID:         adminUser.ID,
 		FullName:   adminUser.FullName,
-		Email:      adminUser.Email,
 		Phone:      adminUser.Phone,
 		Role:       adminUser.Role,
 		TOTPSecret: adminUser.TOTPSecret,
 		CreatedAt:  adminUser.CreatedAt,
 	}, nil
+}
+
+func normalizePhone(phone string) string {
+	digits := make([]rune, 0, len(phone))
+	for _, char := range phone {
+		if char >= '0' && char <= '9' {
+			digits = append(digits, char)
+		}
+	}
+	value := string(digits)
+	if len(value) >= 2 && value[:2] == "84" {
+		return value[2:]
+	}
+	if len(value) > 0 && value[0] == '0' {
+		return value[1:]
+	}
+	return value
 }
 
 func (s *Service) Deposit(adminUserID uint, req transaction.DepositRequest) (*transaction.TransactionResponse, error) {

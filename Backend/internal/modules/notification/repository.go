@@ -2,12 +2,41 @@ package notification
 
 import (
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
 	db *gorm.DB
+}
+
+func (r *Repository) UpsertPushToken(token *PushToken) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "token"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"user_id":      token.UserID,
+			"platform":     token.Platform,
+			"last_seen_at": time.Now(),
+			"updated_at":   time.Now(),
+		}),
+	}).Create(token).Error
+}
+
+func (r *Repository) DeletePushToken(userID uint, token string) error {
+	return r.db.Where("user_id = ? AND token = ?", userID, token).
+		Delete(&PushToken{}).Error
+}
+
+func (r *Repository) DeletePushTokenValue(token string) error {
+	return r.db.Where("token = ?", token).Delete(&PushToken{}).Error
+}
+
+func (r *Repository) FindPushTokensByUserID(userID uint) ([]PushToken, error) {
+	var tokens []PushToken
+	err := r.db.Where("user_id = ?", userID).Find(&tokens).Error
+	return tokens, err
 }
 
 func NewRepository(db *gorm.DB) *Repository {

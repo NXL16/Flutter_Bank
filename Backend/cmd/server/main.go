@@ -1,15 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"bank-service/internal/config"
 	"bank-service/internal/database"
-	"bank-service/internal/infrastructure/email"
 	"bank-service/internal/infrastructure/firebase"
 	"bank-service/internal/modules/account"
 	"bank-service/internal/modules/admin"
@@ -42,11 +39,13 @@ func main() {
 		&auth.UserDevice{},
 		&auth.PendingLogin{},
 		&notification.Notification{},
+		&notification.PushToken{},
 		&account.Account{},
 		&savings.SavingsDetail{},
 		&credit.CreditDetail{},
 		&user.UserProfile{},
 		&transaction.Transaction{},
+		&transaction.LedgerEntry{},
 		&payment.Merchant{},
 		&payment.PaymentSession{},
 	); err != nil {
@@ -68,76 +67,46 @@ func main() {
 	r.Use(corsMiddleware(cfg))
 
 	authRepo := auth.NewRepository(database.DB)
-	otpRepo := auth.NewOTPRepository(database.Mongo)
-
-	// THÊM: repository lưu thông tin đăng ký chờ xác thực OTP trong MongoDB
-	verifyRegisterRepo := auth.NewVerifyRegisterRepository(database.Mongo)
-
-	emailSender := email.NewSender(cfg)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// SỬA: tạo TTL index cho OTP reset password thông qua repository
-	if err := otpRepo.CreateTTLIndex(ctx); err != nil {
-		log.Fatalf("❌ Lỗi tạo TTL Index cho OTP: %v", err)
-	}
-	log.Println("✅ TTL Index cho OTP MongoDB đã được cấu hình!")
-
-	// THÊM: tạo TTL index cho verify register
-	if err := verifyRegisterRepo.CreateTTLIndex(ctx); err != nil {
-		log.Fatalf("❌ Lỗi tạo TTL Index cho Verify Register: %v", err)
-	}
-	log.Println("✅ TTL Index cho Verify Register MongoDB đã được cấu hình!")
-
 	accountRepo := account.NewRepository(database.DB)
 	accountService := account.NewService(accountRepo)
 
-	// Seed Super Admin (Được dời xuống sau khi khởi tạo accountService để tự tạo ví)
-	var count int64
-	if err := database.DB.Model(&auth.User{}).Where("role = ?", "super_admin").Count(&count).Error; err != nil {
-		log.Printf("⚠️ Lỗi kiểm tra tài khoản Super Admin: %v", err)
-	} else if count == 0 {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("SuperAdmin123!"), bcrypt.DefaultCost)
-		if err != nil {
-			log.Fatalf("❌ Lỗi mã hóa mật khẩu Super Admin: %v", err)
-		}
-		superAdmin := auth.User{
-			FullName:     "Super Admin",
-			Email:        "superadmin@nfbank.com",
-			PasswordHash: string(hashedPassword),
-			Phone:        "0999999999",
-			Role:         "super_admin",
-			IsVerified:   true,
-			IsLocked:     false,
-			TOTPSecret:   "KGF2MOLIONATKJ5IWJW4FJYUVFS7KHPT",
-		}
-		if err := database.DB.Create(&superAdmin).Error; err != nil {
-			log.Printf("⚠️ Lỗi tạo tài khoản Super Admin mặc định: %v", err)
-		} else {
-			log.Println("✅ Đã tạo tài khoản Super Admin mặc định (superadmin@nfbank.com / SuperAdmin123!)")
-			if err := accountService.CreateDefaultPaymentAccount(superAdmin.ID); err != nil {
-				log.Printf("⚠️ Lỗi tạo tài khoản ví mặc định cho Super Admin: %v", err)
+	if cfg.EnableDevSeed {
+		log.Println("⚠️ Development seed đang được bật")
+
+		var count int64
+		if err := database.DB.Model(&auth.User{}).Where("role = ?", "super_admin").Count(&count).Error; err != nil {
+			log.Printf("⚠️ Lỗi kiểm tra tài khoản Super Admin: %v", err)
+		} else if count == 0 {
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte("SuperAdmin123!"), bcrypt.DefaultCost)
+			if err != nil {
+				log.Fatalf("❌ Lỗi mã hóa mật khẩu Super Admin: %v", err)
+			}
+			superAdmin := auth.User{
+				FullName:     "Super Admin",
+				Email:        "84999999999@phone.identity",
+				PasswordHash: string(hashedPassword),
+				Phone:        "+84999999999",
+				Role:         "super_admin",
+				IsVerified:   true,
+				IsLocked:     false,
+				TOTPSecret:   "KGF2MOLIONATKJ5IWJW4FJYUVFS7KHPT",
+			}
+			if err := database.DB.Create(&superAdmin).Error; err != nil {
+				log.Printf("⚠️ Lỗi tạo tài khoản Super Admin phát triển: %v", err)
 			} else {
-				log.Println("✅ Đã cấp tài khoản ví mặc định cho Super Admin!")
+				_ = accountService.CreateDefaultPaymentAccount(superAdmin.ID)
 			}
 		}
+
+		seedTestUsers(database.DB, accountService)
+		seedMerchant(database.DB, accountService)
 	}
-
-	// Seed 2 tài khoản khách hàng kiểm thử mặc định (Nguyen Van A và Tran Thi B)
-	seedTestUsers(database.DB, accountService)
-
-	// Seed Merchant đối tác (App Âm Nhạc)
-	seedMerchant(database.DB, accountService)
 
 	userRepo := user.NewRepository(database.DB)
 	userService := user.NewService(userRepo)
 
 	authService := auth.NewService(
 		authRepo,
-		otpRepo,
-		verifyRegisterRepo,
-		emailSender,
 		accountService,
 		userService,
 		cfg,
@@ -150,11 +119,11 @@ func main() {
 
 	// Khởi tạo notification module
 	notificationRepo := notification.NewRepository(database.DB)
-	notificationService := notification.NewService(notificationRepo)
+	notificationService := notification.NewService(notificationRepo, firebaseClient)
 	notificationHandler := notification.NewHandler(notificationService)
 
 	transactionRepo := transaction.NewRepository(database.DB)
-	transactionService := transaction.NewService(transactionRepo, firebaseClient, notificationService)
+	transactionService := transaction.NewService(transactionRepo, firebaseClient, notificationService, cfg)
 	transactionHandler := transaction.NewHandler(transactionService)
 
 	adminRepo := admin.NewRepository(database.DB)
@@ -224,26 +193,25 @@ func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
 
 func seedTestUsers(db *gorm.DB, accountService *account.Service) {
 	usersToSeed := []struct {
-		Email    string
 		FullName string
 		Phone    string
 		Password string
 	}{
-		{"testuser1@nfbank.com", "Nguyen Van A", "+84999000001", "Testuser123!"},
-		{"testuser2@nfbank.com", "Tran Thi B", "+84999000002", "Testuser123!"},
+		{"Nguyen Van A", "+84999000001", "Testuser123!"},
+		{"Tran Thi B", "+84999000002", "Testuser123!"},
 	}
 
 	for _, u := range usersToSeed {
 		var count int64
-		if err := db.Model(&auth.User{}).Where("email = ?", u.Email).Count(&count).Error; err == nil && count == 0 {
+		if err := db.Model(&auth.User{}).Where("phone = ?", u.Phone).Count(&count).Error; err == nil && count == 0 {
 			hashed, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
 			if err != nil {
-				log.Printf("⚠️ Lỗi mã hóa mật khẩu test user %s: %v", u.Email, err)
+				log.Printf("⚠️ Lỗi mã hóa mật khẩu test user %s: %v", u.Phone, err)
 				continue
 			}
 			user := auth.User{
 				FullName:     u.FullName,
-				Email:        u.Email,
+				Email:        u.Phone[1:] + "@phone.identity",
 				PasswordHash: string(hashed),
 				Phone:        u.Phone,
 				Role:         "user",
@@ -251,11 +219,11 @@ func seedTestUsers(db *gorm.DB, accountService *account.Service) {
 				IsLocked:     false,
 			}
 			if err := db.Create(&user).Error; err != nil {
-				log.Printf("⚠️ Lỗi tạo test user %s: %v", u.Email, err)
+				log.Printf("⚠️ Lỗi tạo test user %s: %v", u.Phone, err)
 			} else {
-				log.Printf("✅ Đã tạo test user %s (Testuser123!)", u.Email)
+				log.Printf("✅ Đã tạo test user %s (Testuser123!)", u.Phone)
 				if err := accountService.CreateDefaultPaymentAccount(user.ID); err != nil {
-					log.Printf("⚠️ Lỗi cấp tài khoản ví cho test user %s: %v", u.Email, err)
+					log.Printf("⚠️ Lỗi cấp tài khoản ví cho test user %s: %v", u.Phone, err)
 				}
 			}
 		}
@@ -264,11 +232,11 @@ func seedTestUsers(db *gorm.DB, accountService *account.Service) {
 
 func seedMerchant(db *gorm.DB, accountService *account.Service) {
 	// 1. Seed Merchant User
-	merchantEmail := "music_app_merchant@nfbank.com"
+	merchantPhone := "+84888000001"
 	var userCount int64
 	var merchantUser auth.User
 
-	err := db.Model(&auth.User{}).Where("email = ?", merchantEmail).Count(&userCount).Error
+	err := db.Model(&auth.User{}).Where("phone = ?", merchantPhone).Count(&userCount).Error
 	if err == nil && userCount == 0 {
 		hashed, err := bcrypt.GenerateFromPassword([]byte("Merchant123!"), bcrypt.DefaultCost)
 		if err != nil {
@@ -276,9 +244,9 @@ func seedMerchant(db *gorm.DB, accountService *account.Service) {
 		}
 		merchantUser = auth.User{
 			FullName:     "Music App Merchant",
-			Email:        merchantEmail,
+			Email:        "84888000001@phone.identity",
 			PasswordHash: string(hashed),
-			Phone:        "+84888000001",
+			Phone:        merchantPhone,
 			Role:         "user",
 			IsVerified:   true,
 			IsLocked:     false,
@@ -287,13 +255,13 @@ func seedMerchant(db *gorm.DB, accountService *account.Service) {
 			log.Printf("⚠️ Lỗi tạo tài khoản merchant user: %v", err)
 			return
 		}
-		log.Println("✅ Đã tạo tài khoản Merchant User mặc định (music_app_merchant@nfbank.com)")
+		log.Printf("✅ Đã tạo tài khoản Merchant User mặc định (%s)", merchantPhone)
 		if err := accountService.CreateDefaultPaymentAccount(merchantUser.ID); err != nil {
 			log.Printf("⚠️ Lỗi tạo tài khoản ví cho Merchant User: %v", err)
 			return
 		}
 	} else {
-		db.Where("email = ?", merchantEmail).First(&merchantUser)
+		db.Where("phone = ?", merchantPhone).First(&merchantUser)
 	}
 
 	// 2. Lấy ID tài khoản ví thanh toán PAYMENT của Merchant User

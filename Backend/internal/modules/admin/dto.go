@@ -5,7 +5,6 @@ import "time"
 type AdminUserResponse struct {
 	ID             uint      `json:"id"`
 	FullName       string    `json:"full_name"`
-	Email          string    `json:"email"`
 	Phone          string    `json:"phone"`
 	Role           string    `json:"role"`
 	IsVerified     bool      `json:"is_verified"`
@@ -17,7 +16,6 @@ type AdminUserResponse struct {
 
 type CreateAdminRequest struct {
 	FullName string `json:"full_name" binding:"required"`
-	Email    string `json:"email" binding:"required"`
 	Phone    string `json:"phone" binding:"required"`
 	Password string `json:"password" binding:"required,min=8"`
 }
@@ -25,7 +23,6 @@ type CreateAdminRequest struct {
 type CreateAdminResponse struct {
 	ID         uint      `json:"id"`
 	FullName   string    `json:"full_name"`
-	Email      string    `json:"email"`
 	Phone      string    `json:"phone"`
 	Role       string    `json:"role"`
 	TOTPSecret string    `json:"totp_secret"`
