@@ -2,7 +2,6 @@ package transaction
 
 import (
 	"bank-service/internal/config"
-	"bank-service/internal/infrastructure/firebase"
 	"bank-service/internal/modules/account"
 	"bank-service/internal/modules/notification"
 	"errors"
@@ -15,23 +14,20 @@ import (
 )
 
 type Service struct {
-	repo           *Repository
-	firebaseClient *firebase.Client
-	notiService    *notification.Service
-	cfg            *config.Config
+	repo        *Repository
+	notiService *notification.Service
+	cfg         *config.Config
 }
 
 func NewService(
 	repo *Repository,
-	firebaseClient *firebase.Client,
 	notiService *notification.Service,
 	cfg *config.Config,
 ) *Service {
 	return &Service{
-		repo:           repo,
-		firebaseClient: firebaseClient,
-		notiService:    notiService,
-		cfg:            cfg,
+		repo:        repo,
+		notiService: notiService,
+		cfg:         cfg,
 	}
 }
 
@@ -71,21 +67,8 @@ func (s *Service) Transfer(
 		return mapTransactionResponse(existing), nil
 	}
 
-	if s.cfg.ServerMode == "production" && req.IDToken == "" {
-		return nil, errors.New("giao dịch chuyển tiền yêu cầu xác thực OTP")
-	}
-	if req.IDToken != "" {
-		verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
-		if err != nil {
-			return nil, err
-		}
-		userPhone, err := s.repo.GetUserPhone(userID)
-		if err != nil {
-			return nil, errors.New("không thể xác thực thông tin số điện thoại của người dùng")
-		}
-		if normalizePhone(verifiedPhone) != normalizePhone(userPhone) {
-			return nil, errors.New("số điện thoại xác thực OTP không trùng khớp với số điện thoại đăng ký tài khoản")
-		}
+	if err := s.VerifyTransactionPIN(userID, req.TransactionPIN); err != nil {
+		return nil, err
 	}
 
 	var transactionResult *Transaction
@@ -375,19 +358,6 @@ func (s *Service) GetTransactionDetail(
 
 	result := mapTransactionView(*transaction)
 	return &result, nil
-}
-
-func normalizePhone(phone string) string {
-	reg := regexp.MustCompile(`\D`)
-	digits := reg.ReplaceAllString(phone, "")
-
-	if len(digits) >= 11 && digits[:2] == "84" {
-		return digits[2:]
-	}
-	if len(digits) > 0 && digits[:1] == "0" {
-		return digits[1:]
-	}
-	return digits
 }
 
 func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionResponse, error) {

@@ -56,6 +56,40 @@ func (h *Handler) ResolveAccount(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Xác minh tài khoản thành công", result)
 }
 
+func (h *Handler) GetTransactionPINStatus(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "Không xác định được người dùng", nil)
+		return
+	}
+
+	result, err := h.service.GetTransactionPINStatus(userID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Không thể kiểm tra mã PIN giao dịch", err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Lấy trạng thái PIN giao dịch thành công", result)
+}
+
+func (h *Handler) SetupTransactionPIN(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "Không xác định được người dùng", nil)
+		return
+	}
+
+	var req SetupTransactionPINRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "PIN phải gồm đúng 6 chữ số", nil)
+		return
+	}
+	if err := h.service.SetupTransactionPIN(userID, req); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+	response.Success(c, http.StatusCreated, "Tạo mã PIN giao dịch thành công", nil)
+}
+
 func (h *Handler) GetMyTransactions(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	if userID == 0 {

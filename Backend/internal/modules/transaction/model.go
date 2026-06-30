@@ -35,3 +35,15 @@ type LedgerEntry struct {
 	BalanceAfter  int64     `gorm:"not null" json:"balance_after"`
 	CreatedAt     time.Time `json:"created_at"`
 }
+
+// TransactionPIN lưu mã PIN giao dịch dưới dạng bcrypt hash.
+// Không bao giờ lưu hoặc trả PIN dạng rõ qua API.
+type TransactionPIN struct {
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	UserID         uint       `gorm:"not null;uniqueIndex" json:"user_id"`
+	PINHash        string     `gorm:"type:varchar(255);not null" json:"-"`
+	FailedAttempts int        `gorm:"not null;default:0" json:"-"`
+	LockedUntil    *time.Time `gorm:"index" json:"-"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}

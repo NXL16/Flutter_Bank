@@ -21,7 +21,7 @@ class TransferRepository {
     required int amount,
     required String description,
     required String idempotencyKey,
-    String idToken = '',
+    required String transactionPin,
   }) async {
     final result = await ApiService.post(
       ApiUrl.transfer,
@@ -31,10 +31,26 @@ class TransferRepository {
         'receiver_account_number': accountNumber,
         'amount': amount,
         'description': description,
-        'id_token': idToken,
+        'transaction_pin': transactionPin,
       },
     );
     return TransferReceipt.fromJson(_map(result.data));
+  }
+
+  Future<bool> hasTransactionPin() async {
+    final result = await ApiService.get(
+      ApiUrl.transactionPinStatus,
+      auth: true,
+    );
+    return _map(result.data)['has_pin'] == true;
+  }
+
+  Future<void> setupTransactionPin(String pin, String confirmPin) async {
+    await ApiService.post(
+      ApiUrl.setupTransactionPin,
+      auth: true,
+      body: {'pin': pin, 'confirm_pin': confirmPin},
+    );
   }
 
   static String createIdempotencyKey() {

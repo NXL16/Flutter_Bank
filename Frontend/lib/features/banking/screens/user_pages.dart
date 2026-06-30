@@ -62,10 +62,6 @@ class _DashboardPageState extends State<DashboardPage> {
           PageTitle(
             'Xin chào, ${user?.fullName ?? 'bạn'}',
             subtitle: 'Đây là tình hình tài chính hôm nay.',
-            trailing: IconButton(
-              onPressed: load,
-              icon: const Icon(Icons.refresh),
-            ),
           ),
           const SizedBox(height: 24),
           LayoutBuilder(
@@ -621,7 +617,9 @@ class _SavingsPageState extends State<SavingsPage> {
 }
 
 class NotificationsPage extends StatefulWidget {
-  const NotificationsPage({super.key});
+  const NotificationsPage({super.key, this.onUnreadCountChanged});
+
+  final ValueChanged<int>? onUnreadCountChanged;
 
   @override
   State<NotificationsPage> createState() => _NotificationsPageState();
@@ -642,6 +640,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       items = await _repo.notifications();
       error = null;
+      widget.onUnreadCountChanged?.call(
+        items.where((item) => item['is_read'] != true).length,
+      );
     } catch (e) {
       error = '$e';
     } finally {
@@ -724,7 +725,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
 }
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+  const ProfilePage({super.key, required this.onLogout});
+
+  final Future<void> Function() onLogout;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -777,6 +780,47 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> selectDateOfBirth() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final firstDate = DateTime(1900);
+    final current = DateTime.tryParse(date.text);
+    final initialDate =
+        current != null &&
+            !current.isBefore(firstDate) &&
+            !current.isAfter(today)
+        ? current
+        : DateTime(today.year - 18, today.month, today.day);
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: today,
+      helpText: 'CHỌN NGÀY SINH',
+      cancelText: 'Hủy',
+      confirmText: 'Chọn',
+      fieldLabelText: 'Ngày sinh',
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: Theme.of(context).colorScheme.copyWith(
+            primary: const Color(0xFF7C83FD),
+            surface: const Color(0xFF151D31),
+          ),
+          dialogTheme: const DialogThemeData(
+            backgroundColor: Color(0xFF151D31),
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      date.text =
+          '${selected.year.toString().padLeft(4, '0')}-'
+          '${selected.month.toString().padLeft(2, '0')}-'
+          '${selected.day.toString().padLeft(2, '0')}';
+    });
+  }
+
   void changePassword() {
     final old = TextEditingController();
     final next = TextEditingController();
@@ -825,6 +869,83 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+
+  Future<void> confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF151D31),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0x337C83FD)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Đăng xuất',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 7),
+                const Text(
+                  'Bạn có chắc muốn đăng xuất khỏi NF Bank?',
+                  style: TextStyle(
+                    color: Color(0xFF9BA8C7),
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(42),
+                          foregroundColor: const Color(0xFFB7C0D7),
+                          side: const BorderSide(color: Color(0xFF36425D)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                        ),
+                        child: const Text('Hủy'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(42),
+                          backgroundColor: const Color(0xFF6D74F7),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                        ),
+                        child: const Text(
+                          'Đăng xuất',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (confirmed == true) await widget.onLogout();
   }
 
   @override
@@ -903,15 +1024,32 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: date,
-                    decoration: fieldDecoration(
-                      'Ngày sinh',
-                      hint: 'YYYY-MM-DD',
-                    ),
+                    readOnly: true,
+                    showCursor: false,
+                    enableInteractiveSelection: false,
+                    onTap: selectDateOfBirth,
+                    decoration:
+                        fieldDecoration(
+                          'Ngày sinh',
+                          hint: 'Chọn ngày tháng năm sinh',
+                        ).copyWith(
+                          suffixIcon: const Icon(Icons.calendar_month_rounded),
+                        ),
                   ),
                   const SizedBox(height: 20),
                   FilledButton(
                     onPressed: save,
                     child: const Text('Lưu thay đổi'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: confirmLogout,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFF8A9B),
+                      side: const BorderSide(color: Color(0x66FF6B7A)),
+                    ),
+                    icon: const Icon(Icons.logout_rounded),
+                    label: const Text('Đăng xuất'),
                   ),
                 ],
               ),

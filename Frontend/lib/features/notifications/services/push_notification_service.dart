@@ -6,7 +6,8 @@ import '../../../core/constants/api_url.dart';
 import '../../../core/network/api_service.dart';
 import '../../../core/services/firebase_bootstrap.dart';
 
-typedef ForegroundNotification = void Function(String title, String body);
+typedef ForegroundNotification =
+    void Function(String title, String body, String? type);
 
 class PushNotificationService {
   PushNotificationService._();
@@ -46,6 +47,7 @@ class PushNotificationService {
           onForegroundNotification?.call(
             notification.title ?? 'NF Bank',
             notification.body ?? '',
+            message.data['type'],
           );
         }
       });

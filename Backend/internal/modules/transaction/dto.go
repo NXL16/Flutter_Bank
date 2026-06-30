@@ -6,7 +6,7 @@ type TransferRequest struct {
 	ReceiverAccountNumber string `json:"receiver_account_number" binding:"required"`
 	Amount                int64  `json:"amount" binding:"required,gt=0"`
 	Description           string `json:"description"`
-	IDToken               string `json:"id_token"`
+	TransactionPIN        string `json:"transaction_pin" binding:"required"`
 	IdempotencyKey        string `json:"-"`
 }
 
@@ -38,4 +38,13 @@ type DepositRequest struct {
 	ReceiverAccountNumber string `json:"receiver_account_number" binding:"required"`
 	Amount                int64  `json:"amount" binding:"required,gt=0"`
 	Description           string `json:"description"`
+}
+
+type TransactionPINStatusResponse struct {
+	HasPIN bool `json:"has_pin"`
+}
+
+type SetupTransactionPINRequest struct {
+	PIN        string `json:"pin" binding:"required"`
+	ConfirmPIN string `json:"confirm_pin" binding:"required"`
 }

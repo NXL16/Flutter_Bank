@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/services/bank_repository.dart';
 import '../../../core/storage/token_storage.dart';
 import '../../auth/screens/login_screen.dart';
 import '../../auth/services/auth_service.dart';
@@ -16,16 +17,37 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  static const _notificationIndex = 5;
+  static const _profileIndex = 6;
+
+  final _bankRepository = const BankRepository();
   SessionUser? _user;
+  String _avatarUrl = '';
+  int _unreadNotifications = 0;
+  int _notificationRevision = 0;
   int _index = 0;
 
   @override
   void initState() {
     super.initState();
     _loadUser();
+    _loadShellMetadata();
     PushNotificationService.instance.initialize(
-      onForegroundNotification: (title, body) {
-        if (mounted) showMessage(context, '$title\n$body');
+      onForegroundNotification: (title, body, type) {
+        if (mounted) {
+          setState(() {
+            _unreadNotifications++;
+            _notificationRevision++;
+          });
+          showMessage(
+            context,
+            '$title\n$body',
+            transaction:
+                type == 'BALANCE_FLUCTUATION' ||
+                type == 'PAYMENT_GATEWAY' ||
+                type == 'TRANSACTION',
+          );
+        }
       },
     );
   }
@@ -34,6 +56,41 @@ class _AppShellState extends State<AppShell> {
     final user = await TokenStorage.getUser();
     if (mounted) setState(() => _user = user);
   }
+
+  Future<void> _loadShellMetadata() async {
+    try {
+      final results = await Future.wait([
+        _bankRepository.profile(),
+        _bankRepository.notifications(),
+      ]);
+      final profile = results[0] as Map<String, dynamic>;
+      final notifications = results[1] as List<Map<String, dynamic>>;
+      if (!mounted) return;
+      setState(() {
+        _avatarUrl = profile['avatar_url']?.toString().trim() ?? '';
+        _unreadNotifications = notifications
+            .where((item) => item['is_read'] != true)
+            .length;
+      });
+    } catch (_) {
+      // Metadata không được làm gián đoạn việc mở ứng dụng.
+    }
+  }
+
+  void _setUnreadNotifications(int value) {
+    if (mounted && value != _unreadNotifications) {
+      setState(() => _unreadNotifications = value);
+    }
+  }
+
+  void _openNotifications() {
+    setState(() {
+      _index = _notificationIndex;
+      _notificationRevision++;
+    });
+  }
+
+  void _openProfile() => setState(() => _index = _profileIndex);
 
   Future<void> _logout() async {
     await PushNotificationService.instance.unregister();
@@ -65,12 +122,19 @@ class _AppShellState extends State<AppShell> {
         TransactionsPage(),
       ),
       const _NavItem('Tiết kiệm', Icons.savings_outlined, SavingsPage()),
-      const _NavItem(
+      _NavItem(
         'Thông báo',
         Icons.notifications_none_rounded,
-        NotificationsPage(),
+        NotificationsPage(
+          key: ValueKey('notifications-$_notificationRevision'),
+          onUnreadCountChanged: _setUnreadNotifications,
+        ),
       ),
-      const _NavItem('Hồ sơ', Icons.person_outline_rounded, ProfilePage()),
+      _NavItem(
+        'Hồ sơ',
+        Icons.person_outline_rounded,
+        ProfilePage(onLogout: _logout),
+      ),
     ];
     if (_index >= items.length) _index = 0;
 
@@ -79,13 +143,35 @@ class _AppShellState extends State<AppShell> {
       appBar: wide
           ? null
           : AppBar(
+              leadingWidth: 56,
+              leading: IconButton(
+                tooltip: 'Mở hồ sơ',
+                onPressed: _openProfile,
+                icon: CircleAvatar(
+                  radius: 17,
+                  backgroundImage: _avatarUrl.isEmpty
+                      ? null
+                      : NetworkImage(_avatarUrl),
+                  child: _avatarUrl.isEmpty
+                      ? Text(
+                          user.fullName.trim().isEmpty
+                              ? 'N'
+                              : user.fullName.trim()[0].toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        )
+                      : null,
+                ),
+              ),
               title: Text(items[_index].label),
               actions: [
-                IconButton(
-                  tooltip: 'Đăng xuất',
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout_rounded),
+                _NotificationButton(
+                  unreadCount: _unreadNotifications,
+                  onPressed: _openNotifications,
                 ),
+                const SizedBox(width: 6),
               ],
             ),
       body: Row(
@@ -115,19 +201,6 @@ class _AppShellState extends State<AppShell> {
                       ),
                     ],
                   ],
-                ),
-              ),
-              trailing: Expanded(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 18),
-                    child: IconButton(
-                      tooltip: 'Đăng xuất',
-                      onPressed: _logout,
-                      icon: const Icon(Icons.logout_rounded),
-                    ),
-                  ),
                 ),
               ),
               destinations: items
@@ -165,38 +238,145 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: wide
           ? null
-          : NavigationBar(
-              selectedIndex: _index.clamp(0, 4),
-              onDestinationSelected: (value) => setState(() => _index = value),
-              destinations: items
-                  .take(5)
-                  .map(
-                    (item) => NavigationDestination(
-                      icon: Icon(item.icon),
-                      label: item.label,
-                    ),
-                  )
-                  .toList(),
+          : _MobileBottomBar(
+              items: items.take(5).toList(growable: false),
+              selectedIndex: _index < 5 ? _index : null,
+              onSelected: (value) => setState(() => _index = value),
             ),
-      drawer: !wide && items.length > 5
-          ? Drawer(
-              child: ListView(
-                padding: const EdgeInsets.only(top: 60),
-                children: [
-                  for (var i = 5; i < items.length; i++)
-                    ListTile(
-                      leading: Icon(items[i].icon),
-                      title: Text(items[i].label),
-                      selected: _index == i,
-                      onTap: () {
-                        Navigator.pop(context);
-                        setState(() => _index = i);
-                      },
-                    ),
-                ],
+    );
+  }
+}
+
+class _NotificationButton extends StatelessWidget {
+  const _NotificationButton({
+    required this.unreadCount,
+    required this.onPressed,
+  });
+
+  final int unreadCount;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'Thông báo',
+    onPressed: onPressed,
+    icon: Stack(
+      clipBehavior: Clip.none,
+      children: [
+        const Icon(Icons.notifications_none_rounded),
+        if (unreadCount > 0)
+          Positioned(
+            right: -7,
+            top: -6,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF5C72),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.surface,
+                  width: 1.5,
+                ),
               ),
-            )
-          : null,
+              alignment: Alignment.center,
+              child: Text(
+                unreadCount > 99 ? '99+' : '$unreadCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _MobileBottomBar extends StatelessWidget {
+  const _MobileBottomBar({
+    required this.items,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<_NavItem> items;
+  final int? selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    elevation: 8,
+    child: SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 66,
+        child: Row(
+          children: [
+            for (var index = 0; index < items.length; index++)
+              Expanded(
+                child: _BottomBarItem(
+                  item: items[index],
+                  selected: selectedIndex == index,
+                  onTap: () => onSelected(index),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _BottomBarItem extends StatelessWidget {
+  const _BottomBarItem({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _NavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? const Color(0xFF9EA4FF) : const Color(0xFF7F8BA5);
+    return InkResponse(
+      onTap: onTap,
+      radius: 30,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 38,
+            height: 28,
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFF7C83FD).withValues(alpha: .15)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(item.icon, size: 21, color: color),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
