@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nfbank_mongo/features/transfers/models/account_resolution.dart';
-import 'package:nfbank_mongo/features/transfers/models/transfer_receipt.dart';
-import 'package:nfbank_mongo/features/transfers/services/transfer_repository.dart';
-import 'package:nfbank_mongo/shared/utils/formatters.dart';
+import 'package:nf_bank/features/transfers/models/account_resolution.dart';
+import 'package:nf_bank/features/transfers/models/transfer_receipt.dart';
+import 'package:nf_bank/features/transfers/services/transfer_repository.dart';
+import 'package:nf_bank/shared/utils/formatters.dart';
 
 void main() {
   test('idempotency keys are valid and unique', () {
@@ -17,6 +17,7 @@ void main() {
     final account = AccountResolution.fromJson({
       'account_number': '970412345678',
       'account_name': 'Nguyen Van A',
+      'avatar_url': 'https://res.cloudinary.com/nfbank/avatar.jpg',
       'bank_name': 'NF Bank',
       'currency': 'VND',
     });
@@ -30,6 +31,7 @@ void main() {
     });
 
     expect(account.accountName, 'Nguyen Van A');
+    expect(account.avatarUrl, startsWith('https://'));
     expect(receipt.amount, 150000);
     expect(receipt.createdAt, isNotNull);
   });

@@ -30,6 +30,7 @@ type TransactionResponse struct {
 type AccountResolutionResponse struct {
 	AccountNumber string `json:"account_number"`
 	AccountName   string `json:"account_name"`
+	AvatarURL     string `json:"avatar_url"`
 	BankName      string `json:"bank_name"`
 	Currency      string `json:"currency"`
 }

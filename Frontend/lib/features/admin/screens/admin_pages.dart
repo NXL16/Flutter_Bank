@@ -260,15 +260,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                         'Tài khoản ngân hàng',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          showCreateAccount(id);
-                        },
-                        icon: const Icon(Icons.add_rounded),
-                        label: const Text('Cấp tài khoản'),
-                      ),
                     ],
                   ),
                   if (accounts.isEmpty)
@@ -314,77 +305,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
     }
-  }
-
-  Future<void> showCreateAccount(int userId) async {
-    String type = 'PAYMENT';
-    String currency = 'VND';
-    await showDialog<void>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Cấp tài khoản mới'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: type,
-                  decoration: fieldDecoration('Loại tài khoản'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'PAYMENT',
-                      child: Text('Thanh toán'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'SAVINGS',
-                      child: Text('Tiết kiệm'),
-                    ),
-                    DropdownMenuItem(value: 'CREDIT', child: Text('Tín dụng')),
-                  ],
-                  onChanged: (value) =>
-                      setDialogState(() => type = value ?? type),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: currency,
-                  decoration: fieldDecoration('Tiền tệ'),
-                  items: const [
-                    DropdownMenuItem(value: 'VND', child: Text('VND')),
-                    DropdownMenuItem(value: 'USD', child: Text('USD')),
-                  ],
-                  onChanged: (value) =>
-                      setDialogState(() => currency = value ?? currency),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Hủy'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                try {
-                  await _adminRepo.createUserAccount(userId, type, currency);
-                  if (context.mounted) Navigator.pop(context);
-                  if (mounted) {
-                    showMessage(this.context, 'Đã cấp tài khoản');
-                  }
-                } on ApiException catch (e) {
-                  if (context.mounted) {
-                    showMessage(context, e.message, error: true);
-                  }
-                }
-              },
-              child: const Text('Xác nhận'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> showTransactions(int accountId) async {

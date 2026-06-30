@@ -31,20 +31,6 @@ func (r *Repository) FindAccountsByUserID(userID uint) ([]Account, error) {
 	return accounts, err
 }
 
-func (r *Repository) FindAccountByID(accountID uint) (*Account, error) {
-	var account Account
-
-	err := r.db.First(&account, accountID).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return &account, nil
-}
-
 func (r *Repository) FindAccountByNumber(accountNumber string) (*Account, error) {
 	var account Account
 
@@ -53,28 +39,6 @@ func (r *Repository) FindAccountByNumber(accountNumber string) (*Account, error)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, err
-	}
-
-	return &account, nil
-}
-
-func (r *Repository) FindByUserIDAndType(
-	userID uint,
-	accountType string,
-) (*Account, error) {
-
-	var account Account
-
-	err := r.db.
-		Where("user_id = ? AND account_type = ?", userID, accountType).
-		First(&account).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-
 		return nil, err
 	}
 
@@ -93,4 +57,3 @@ func (r *Repository) FindUserRoleByID(userID uint) (string, error) {
 	}
 	return role, nil
 }
-

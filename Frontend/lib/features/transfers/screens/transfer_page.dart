@@ -33,6 +33,7 @@ class _TransferPageState extends State<TransferPage> {
   _TransferStep _step = _TransferStep.details;
   SessionUser? _user;
   Map<String, dynamic>? _sourceAccount;
+  String _senderAvatarURL = '';
   AccountResolution? _recipient;
   List<RecentRecipient> _recentRecipients = const [];
   TransferReceipt? _receipt;
@@ -84,9 +85,11 @@ class _TransferPageState extends State<TransferPage> {
       final results = await Future.wait([
         TokenStorage.getUser(),
         _bankRepository.accounts(),
+        _bankRepository.profile(),
       ]);
       final user = results[0] as SessionUser?;
       final accounts = results[1] as List<Map<String, dynamic>>;
+      final profile = results[2] as Map<String, dynamic>;
       Map<String, dynamic>? source;
       for (final account in accounts) {
         if (account['account_type']?.toString() == 'PAYMENT') {
@@ -99,6 +102,7 @@ class _TransferPageState extends State<TransferPage> {
         setState(() {
           _user = user;
           _sourceAccount = source;
+          _senderAvatarURL = profile['avatar_url']?.toString().trim() ?? '';
         });
       }
     } on ApiException {
@@ -221,7 +225,10 @@ class _TransferPageState extends State<TransferPage> {
     }
 
     if (!mounted) return;
-    final pinResult = await _showTransactionPINSheet(createPIN: !hasPIN);
+    final pinResult = await showTransactionPINSheet(
+      context,
+      createPIN: !hasPIN,
+    );
     if (pinResult == null || !mounted) return;
 
     setState(() => _loading = true);
@@ -297,18 +304,6 @@ class _TransferPageState extends State<TransferPage> {
       showMessageOnError: true,
     );
   }
-
-  Future<_TransactionPINInput?> _showTransactionPINSheet({
-    required bool createPIN,
-  }) => showModalBottomSheet<_TransactionPINInput>(
-    context: context,
-    useSafeArea: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    isDismissible: false,
-    enableDrag: false,
-    builder: (_) => _TransactionPINSheet(createPIN: createPIN),
-  );
 
   void _reset() {
     _account.clear();
@@ -425,7 +420,7 @@ class _TransferPageState extends State<TransferPage> {
                 TextFormField(
                   controller: _amount,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [_CurrencyInputFormatter()],
+                  inputFormatters: [CurrencyInputFormatter()],
                   style: const TextStyle(
                     color: Color(0xFF9EA4FF),
                     fontSize: 23,
@@ -523,6 +518,7 @@ class _TransferPageState extends State<TransferPage> {
                 accountNumber:
                     _sourceAccount?['account_number']?.toString() ?? '—',
                 bankName: 'NF Bank',
+                avatarURL: _senderAvatarURL,
               ),
               const SizedBox(height: 14),
               const Text(
@@ -534,6 +530,7 @@ class _TransferPageState extends State<TransferPage> {
                 name: recipient.accountName,
                 accountNumber: recipient.accountNumber,
                 bankName: recipient.bankName,
+                avatarURL: recipient.avatarUrl,
               ),
               const Divider(height: 24),
               _InfoRow(
@@ -582,7 +579,7 @@ class _TransferPageState extends State<TransferPage> {
 
   String get _amountInWords {
     if (_parsedAmount <= 0) return '';
-    return '${_numberToVietnameseWords(_parsedAmount)} đồng';
+    return moneyInVietnameseWords(_parsedAmount);
   }
 
   BoxDecoration _panelDecoration() => BoxDecoration(
@@ -942,17 +939,19 @@ class _PartyTile extends StatelessWidget {
     required this.name,
     required this.accountNumber,
     required this.bankName,
+    required this.avatarURL,
   });
 
   final String name;
   final String accountNumber;
   final String bankName;
+  final String avatarURL;
 
   @override
   Widget build(BuildContext context) => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const _BankMark(),
+      _ProfileAvatar(name: name, avatarURL: avatarURL),
       const SizedBox(width: 11),
       Expanded(
         child: Column(
@@ -1042,23 +1041,43 @@ class _BottomActions extends StatelessWidget {
   );
 }
 
-class _TransactionPINInput {
-  const _TransactionPINInput(this.pin, this.confirmPIN);
+Future<TransactionPINInput?> showTransactionPINSheet(
+  BuildContext context, {
+  required bool createPIN,
+  String actionLabel = 'chuyển tiền',
+}) => showModalBottomSheet<TransactionPINInput>(
+  context: context,
+  useSafeArea: true,
+  isScrollControlled: true,
+  backgroundColor: Colors.transparent,
+  isDismissible: false,
+  enableDrag: false,
+  builder: (_) =>
+      TransactionPINSheet(createPIN: createPIN, actionLabel: actionLabel),
+);
+
+class TransactionPINInput {
+  const TransactionPINInput(this.pin, this.confirmPIN);
 
   final String pin;
   final String? confirmPIN;
 }
 
-class _TransactionPINSheet extends StatefulWidget {
-  const _TransactionPINSheet({required this.createPIN});
+class TransactionPINSheet extends StatefulWidget {
+  const TransactionPINSheet({
+    super.key,
+    required this.createPIN,
+    required this.actionLabel,
+  });
 
   final bool createPIN;
+  final String actionLabel;
 
   @override
-  State<_TransactionPINSheet> createState() => _TransactionPINSheetState();
+  State<TransactionPINSheet> createState() => _TransactionPINSheetState();
 }
 
-class _TransactionPINSheetState extends State<_TransactionPINSheet> {
+class _TransactionPINSheetState extends State<TransactionPINSheet> {
   String _pin = '';
   String _confirmPIN = '';
   String? _error;
@@ -1092,7 +1111,7 @@ class _TransactionPINSheetState extends State<_TransactionPINSheet> {
     HapticFeedback.lightImpact();
     Navigator.pop(
       context,
-      _TransactionPINInput(_pin, widget.createPIN ? _confirmPIN : null),
+      TransactionPINInput(_pin, widget.createPIN ? _confirmPIN : null),
     );
   }
 
@@ -1184,7 +1203,7 @@ class _TransactionPINSheetState extends State<_TransactionPINSheet> {
                             ? 'Hai mã PIN phải hoàn toàn giống nhau.'
                             : widget.createPIN
                             ? 'Nhập 6 số khó đoán để bảo vệ mọi giao dịch.'
-                            : 'Vui lòng nhập mã PIN 6 số để xác nhận chuyển tiền.',
+                            : 'Vui lòng nhập mã PIN 6 số để xác nhận ${widget.actionLabel}.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0xFF9BA8C7),
@@ -1238,8 +1257,8 @@ class _TransactionPINSheetState extends State<_TransactionPINSheet> {
                       widget.createPIN && _step == 1
                           ? 'Tiếp tục'
                           : widget.createPIN
-                          ? 'Tạo PIN và chuyển tiền'
-                          : 'Xác nhận chuyển tiền',
+                          ? 'Tạo PIN và ${widget.actionLabel}'
+                          : 'Xác nhận ${widget.actionLabel}',
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
@@ -1483,7 +1502,24 @@ class _RecipientPreview extends StatelessWidget {
     ),
     child: Row(
       children: [
-        const Icon(Icons.verified_rounded, color: Color(0xFF4FD1C5)),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _ProfileAvatar(
+              name: recipient.accountName,
+              avatarURL: recipient.avatarUrl,
+            ),
+            const Positioned(
+              right: -3,
+              bottom: -3,
+              child: Icon(
+                Icons.verified_rounded,
+                size: 16,
+                color: Color(0xFF4FD1C5),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -1509,88 +1545,40 @@ class _RecipientPreview extends StatelessWidget {
   );
 }
 
-class _CurrencyInputFormatter extends TextInputFormatter {
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.name, required this.avatarURL});
+
+  final String name;
+  final String avatarURL;
+
   @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.isEmpty) return const TextEditingValue();
-    final normalized = digits.replaceFirst(RegExp(r'^0+(?=\d)'), '');
-    final formatted = normalized.replaceAllMapped(
-      RegExp(r'\B(?=(\d{3})+(?!\d))'),
-      (_) => '.',
+  Widget build(BuildContext context) {
+    final normalizedURL = avatarURL.trim();
+    final initial = name.trim().isEmpty ? 'N' : name.trim()[0].toUpperCase();
+    return Container(
+      padding: const EdgeInsets.all(1.5),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFF8F95FF), width: 1.5),
+      ),
+      child: CircleAvatar(
+        radius: 19.5,
+        backgroundColor: const Color(0xFF293352),
+        backgroundImage: normalizedURL.startsWith('https://')
+            ? NetworkImage(normalizedURL)
+            : null,
+        child: normalizedURL.startsWith('https://')
+            ? null
+            : Text(
+                initial,
+                style: const TextStyle(
+                  color: Color(0xFFB7BBFF),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+      ),
     );
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
-    );
   }
-}
-
-String _numberToVietnameseWords(int number) {
-  if (number == 0) return 'Không';
-  const units = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ', 'tỷ tỷ'];
-  final groups = <int>[];
-  var remaining = number;
-  while (remaining > 0) {
-    groups.add(remaining % 1000);
-    remaining ~/= 1000;
-  }
-
-  final parts = <String>[];
-  for (var index = groups.length - 1; index >= 0; index--) {
-    final group = groups[index];
-    if (group == 0) continue;
-    final forceHundreds = index < groups.length - 1 && group < 100;
-    final words = _readThreeDigits(group, forceHundreds: forceHundreds);
-    parts.add(units[index].isEmpty ? words : '$words ${units[index]}');
-  }
-  final result = parts.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-  return '${result[0].toUpperCase()}${result.substring(1)}';
-}
-
-String _readThreeDigits(int number, {required bool forceHundreds}) {
-  const digits = [
-    'không',
-    'một',
-    'hai',
-    'ba',
-    'bốn',
-    'năm',
-    'sáu',
-    'bảy',
-    'tám',
-    'chín',
-  ];
-  final hundred = number ~/ 100;
-  final ten = (number % 100) ~/ 10;
-  final unit = number % 10;
-  final words = <String>[];
-
-  if (hundred > 0 || forceHundreds) {
-    words.add('${digits[hundred]} trăm');
-  }
-  if (ten > 1) {
-    words.add('${digits[ten]} mươi');
-  } else if (ten == 1) {
-    words.add('mười');
-  } else if (unit > 0 && (hundred > 0 || forceHundreds)) {
-    words.add('lẻ');
-  }
-  if (unit > 0) {
-    if (unit == 1 && ten > 1) {
-      words.add('mốt');
-    } else if (unit == 5 && ten > 0) {
-      words.add('lăm');
-    } else if (unit == 4 && ten > 1) {
-      words.add('tư');
-    } else {
-      words.add(digits[unit]);
-    }
-  }
-  return words.join(' ');
 }
 
 class _InfoRow extends StatelessWidget {

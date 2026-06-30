@@ -22,6 +22,7 @@ class ApiUrl {
 
   static String get accounts => '$baseUrl/accounts';
   static String get profile => '$baseUrl/users/me';
+  static String get profileAvatar => '$profile/avatar';
   static String get transactions => '$baseUrl/transactions';
   static String get transfer => '$transactions/transfer';
   static String get transactionPinStatus => '$transactions/pin/status';

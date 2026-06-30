@@ -1,16 +1,29 @@
 package user
 
 import (
-	"time"
+	"context"
+	"io"
 )
 
-type Service struct {
-	repo *Repository
+type AvatarUploader interface {
+	UploadAvatar(
+		ctx context.Context,
+		userID uint,
+		file io.Reader,
+		filename string,
+		contentType string,
+	) (string, error)
 }
 
-func NewService(repo *Repository) *Service {
+type Service struct {
+	repo           *Repository
+	avatarUploader AvatarUploader
+}
+
+func NewService(repo *Repository, avatarUploader AvatarUploader) *Service {
 	return &Service{
-		repo: repo,
+		repo:           repo,
+		avatarUploader: avatarUploader,
 	}
 }
 
@@ -49,17 +62,13 @@ func (s *Service) GetMyProfile(userID uint) (*UserProfileResponse, error) {
 	}
 
 	return &UserProfileResponse{
-		UserID:      basicUser.ID,
 		FullName:    basicUser.FullName,
 		Phone:       basicUser.Phone,
 		Role:        basicUser.Role,
-		IsVerified:  basicUser.IsVerified,
-		IsLocked:    basicUser.IsLocked,
 		Address:     profile.Address,
 		AvatarURL:   profile.AvatarURL,
 		Gender:      profile.Gender,
 		DateOfBirth: profile.DateOfBirth,
-		Age:         calculateAge(profile.DateOfBirth),
 	}, nil
 }
 
@@ -70,7 +79,6 @@ func (s *Service) UpdateMyProfile(
 	profile := &UserProfile{
 		UserID:      userID,
 		Address:     req.Address,
-		AvatarURL:   req.AvatarURL,
 		Gender:      req.Gender,
 		DateOfBirth: req.DateOfBirth,
 	}
@@ -84,21 +92,42 @@ func (s *Service) UpdateMyProfile(
 		return s.repo.CreateProfile(profile)
 	}
 
+	profile.AvatarURL = existingProfile.AvatarURL
 	return s.repo.UpdateProfile(userID, profile)
 }
 
-func calculateAge(dateOfBirth *time.Time) int {
-	if dateOfBirth == nil {
-		return 0
+func (s *Service) UploadMyAvatar(
+	ctx context.Context,
+	userID uint,
+	file io.Reader,
+	filename string,
+	contentType string,
+) (string, error) {
+	avatarURL, err := s.avatarUploader.UploadAvatar(
+		ctx,
+		userID,
+		file,
+		filename,
+		contentType,
+	)
+	if err != nil {
+		return "", err
 	}
 
-	now := time.Now()
-
-	age := now.Year() - dateOfBirth.Year()
-
-	if now.YearDay() < dateOfBirth.YearDay() {
-		age--
+	existingProfile, err := s.repo.FindByUserID(userID)
+	if err != nil {
+		return "", err
 	}
-
-	return age
+	if existingProfile == nil {
+		err = s.repo.CreateProfile(&UserProfile{
+			UserID:    userID,
+			AvatarURL: avatarURL,
+		})
+	} else {
+		err = s.repo.UpdateAvatarURL(userID, avatarURL)
+	}
+	if err != nil {
+		return "", err
+	}
+	return avatarURL, nil
 }

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nfbank_mongo/main.dart';
+import 'package:nf_bank/main.dart';
 
 void main() {
   testWidgets('shows login screen for signed-out users', (tester) async {

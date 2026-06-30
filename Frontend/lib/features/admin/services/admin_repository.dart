@@ -23,18 +23,6 @@ class AdminRepository {
     )).data,
   );
 
-  Future<Map<String, dynamic>> createUserAccount(
-    int id,
-    String type,
-    String currency,
-  ) async => _map(
-    (await ApiService.post(
-      '${ApiUrl.admin}/users/$id/accounts',
-      auth: true,
-      body: {'account_type': type, 'currency': currency},
-    )).data,
-  );
-
   Future<List<Map<String, dynamic>>> accountTransactions(int accountId) async =>
       _list(
         (await ApiService.get(

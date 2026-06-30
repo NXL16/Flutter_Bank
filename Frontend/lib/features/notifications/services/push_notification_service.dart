@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../../core/constants/api_url.dart';
@@ -13,7 +15,19 @@ class PushNotificationService {
   PushNotificationService._();
 
   static final instance = PushNotificationService._();
+  static const channelID = 'nfbank_transactions_v2';
+  static const _channel = AndroidNotificationChannel(
+    channelID,
+    'Giao dịch và biến động số dư',
+    description:
+        'Thông báo tức thời cho chuyển khoản, thanh toán và biến động số dư.',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    showBadge: true,
+  );
 
+  final _localNotifications = FlutterLocalNotificationsPlugin();
   StreamSubscription<String>? _refreshSubscription;
   StreamSubscription<RemoteMessage>? _messageSubscription;
   String? _token;
@@ -26,6 +40,7 @@ class PushNotificationService {
 
     try {
       await FirebaseBootstrap.initialize();
+      await _initializeLocalNotifications();
       final messaging = FirebaseMessaging.instance;
       final permission = await messaging.requestPermission(
         alert: true,
@@ -33,6 +48,11 @@ class PushNotificationService {
         sound: true,
       );
       if (permission.authorizationStatus == AuthorizationStatus.denied) return;
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
 
       _token = await messaging.getToken();
       if (_token != null) await _register(_token!);
@@ -41,9 +61,14 @@ class PushNotificationService {
         _token = token;
         await _register(token);
       });
-      _messageSubscription = FirebaseMessaging.onMessage.listen((message) {
+      _messageSubscription = FirebaseMessaging.onMessage.listen((
+        message,
+      ) async {
         final notification = message.notification;
         if (notification != null) {
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            await _showSystemNotification(message);
+          }
           onForegroundNotification?.call(
             notification.title ?? 'NF Bank',
             notification.body ?? '',
@@ -82,4 +107,50 @@ class PushNotificationService {
     auth: true,
     body: {'token': token, 'platform': 'android'},
   );
+
+  Future<void> _initializeLocalNotifications() async {
+    const settings = InitializationSettings(
+      android: AndroidInitializationSettings('ic_stat_nfbank'),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
+    );
+    await _localNotifications.initialize(settings: settings);
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(_channel);
+  }
+
+  Future<void> _showSystemNotification(RemoteMessage message) async {
+    final notification = message.notification;
+    if (notification == null) return;
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelID,
+        'Giao dịch và biến động số dư',
+        channelDescription:
+            'Thông báo tức thời cho chuyển khoản, thanh toán và biến động số dư.',
+        importance: Importance.max,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.status,
+        visibility: NotificationVisibility.public,
+        playSound: true,
+        enableVibration: true,
+        icon: 'ic_stat_nfbank',
+      ),
+    );
+    await _localNotifications.show(
+      id:
+          message.messageId?.hashCode.abs() ??
+          DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+      title: notification.title ?? 'NF Bank',
+      body: notification.body ?? '',
+      notificationDetails: details,
+      payload: message.data['type'],
+    );
+  }
 }

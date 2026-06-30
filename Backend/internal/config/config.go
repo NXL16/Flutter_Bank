@@ -21,17 +21,15 @@ type Config struct {
 	MySQLPort     string
 	MySQLDBName   string
 
-	MongoURI    string
-	MongoDBName string
-
 	AccessTokenSecret   string
 	RefreshTokenSecret  string
-	CSRFSecret          string
 	AppURL              string
 	FirebaseCredentials string
+	CloudinaryCloudName string
+	CloudinaryAPIKey    string
+	CloudinaryAPISecret string
 
 	EnableDevSeed       bool
-	EnableOTPDebug      bool
 	AllowTestPaymentOTP bool
 	TransferMinAmount   int64
 	TransferMaxAmount   int64
@@ -54,18 +52,16 @@ func LoadConfig() *Config {
 		MySQLPassword: getEnv("MYSQL_PASSWORD", ""),
 		MySQLHost:     getEnv("MYSQL_HOST", "localhost"),
 		MySQLPort:     getEnv("MYSQL_PORT", "3306"),
-		MySQLDBName:   getEnv("MYSQL_DB", "nfbank_mysql"),
-
-		MongoURI:    getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		MongoDBName: getEnv("MONGO_DB_NAME", "nfbank_mongo"),
+		MySQLDBName:   getEnv("MYSQL_DB", "nfbank"),
 
 		AccessTokenSecret:   getRequiredEnv("ACCESS_TOKEN_SECRET"),
 		RefreshTokenSecret:  getRequiredEnv("REFRESH_TOKEN_SECRET"),
-		CSRFSecret:          getRequiredEnv("CSRF_SECRET"),
 		AppURL:              getEnv("APP_URL", "http://localhost:8080"),
-		FirebaseCredentials: getEnv("FIREBASE_CREDENTIALS", "./config/firebase-adminsdk.json"),
+		FirebaseCredentials: getEnv("FIREBASE_CREDENTIALS", "./internal/config/firebase-adminsdk.json"),
+		CloudinaryCloudName: getEnv("CLOUDINARY_CLOUD_NAME", ""),
+		CloudinaryAPIKey:    getEnv("CLOUDINARY_API_KEY", ""),
+		CloudinaryAPISecret: getEnv("CLOUDINARY_API_SECRET", ""),
 		EnableDevSeed:       getEnvBool("ENABLE_DEV_SEED", serverMode != "production"),
-		EnableOTPDebug:      getEnvBool("ENABLE_OTP_DEBUG", false),
 		AllowTestPaymentOTP: getEnvBool("ALLOW_TEST_PAYMENT_OTP", false),
 		TransferMinAmount:   getEnvInt64("TRANSFER_MIN_AMOUNT", 10000),
 		TransferMaxAmount:   getEnvInt64("TRANSFER_MAX_AMOUNT", 500000000),
@@ -73,8 +69,8 @@ func LoadConfig() *Config {
 	}
 
 	if cfg.ServerMode == "production" {
-		if cfg.EnableOTPDebug || cfg.AllowTestPaymentOTP {
-			log.Fatal("❌ Không được bật OTP debug hoặc OTP kiểm thử trong production")
+		if cfg.AllowTestPaymentOTP {
+			log.Fatal("❌ Không được bật OTP kiểm thử trong production")
 		}
 		if !strings.HasPrefix(cfg.AppURL, "https://") {
 			log.Fatal("❌ APP_URL phải sử dụng HTTPS trong production")
@@ -84,6 +80,21 @@ func LoadConfig() *Config {
 		cfg.TransferMaxAmount < cfg.TransferMinAmount ||
 		cfg.DailyTransferLimit < cfg.TransferMaxAmount {
 		log.Fatal("❌ Cấu hình hạn mức chuyển tiền không hợp lệ")
+	}
+	cloudinaryValues := []string{
+		cfg.CloudinaryCloudName,
+		cfg.CloudinaryAPIKey,
+		cfg.CloudinaryAPISecret,
+	}
+	configuredCloudinaryValues := 0
+	for _, value := range cloudinaryValues {
+		if strings.TrimSpace(value) != "" {
+			configuredCloudinaryValues++
+		}
+	}
+	if configuredCloudinaryValues != 0 &&
+		configuredCloudinaryValues != len(cloudinaryValues) {
+		log.Fatal("❌ Phải cấu hình đầy đủ CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY và CLOUDINARY_API_SECRET")
 	}
 
 	return cfg

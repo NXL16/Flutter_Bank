@@ -74,7 +74,7 @@ func (r *Repository) MarkAsRead(id uint, userID uint) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errors.New("không tìm thấy thông báo hoặc thông báo không thuộc quyền sở hữu của bạn")
+		return errors.New("Không tìm thấy thông báo hoặc thông báo không thuộc quyền sở hữu của bạn")
 	}
 	return nil
 }

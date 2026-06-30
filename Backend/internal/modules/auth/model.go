@@ -10,7 +10,6 @@ import (
 type User struct {
 	ID             uint                        `gorm:"primaryKey" json:"id"`
 	FullName       string                      `gorm:"type:varchar(255);not null" json:"full_name"`
-	Email          string                      `gorm:"type:varchar(255);uniqueIndex;not null" json:"-"`
 	PasswordHash   string                      `gorm:"type:varchar(255);not null" json:"-"`
 	Phone          string                      `gorm:"type:varchar(20);uniqueIndex;not null" json:"phone"`
 	Role           string                      `gorm:"type:varchar(50);default:user" json:"role"`
@@ -46,17 +45,4 @@ type UserDevice struct {
 	LastLoggedInAt time.Time `gorm:"not null" json:"last_logged_in_at"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
-}
-
-type PendingLogin struct {
-	ID        string    `gorm:"primaryKey;type:varchar(255)" json:"id"` // Pending UUID
-	UserID    uint      `gorm:"not null;index" json:"user_id"`
-	User      User      `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-	DeviceID  string    `gorm:"type:varchar(255);not null" json:"device_id"`
-	UserAgent string    `gorm:"type:text;not null" json:"user_agent"`
-	IPAddress string    `gorm:"type:varchar(45);not null" json:"ip_address"`
-	Location  string    `gorm:"type:varchar(255)" json:"location"`
-	Status    string    `gorm:"type:varchar(20);default:'PENDING'" json:"status"` // PENDING, APPROVED, REJECTED
-	ExpiresAt time.Time `gorm:"not null" json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
 }

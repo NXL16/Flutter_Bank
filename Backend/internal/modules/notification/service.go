@@ -27,10 +27,10 @@ func (s *Service) RegisterPushToken(userID uint, token, platform string) error {
 	token = strings.TrimSpace(token)
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	if userID == 0 || len(token) < 20 {
-		return errors.New("push token không hợp lệ")
+		return errors.New("Push token không hợp lệ")
 	}
 	if platform != "android" && platform != "ios" && platform != "web" {
-		return errors.New("nền tảng push notification không hợp lệ")
+		return errors.New("Nền tảng push notification không hợp lệ")
 	}
 	return s.repo.UpsertPushToken(&PushToken{
 		UserID:     userID,
@@ -42,7 +42,7 @@ func (s *Service) RegisterPushToken(userID uint, token, platform string) error {
 
 func (s *Service) UnregisterPushToken(userID uint, token string) error {
 	if userID == 0 || strings.TrimSpace(token) == "" {
-		return errors.New("push token không hợp lệ")
+		return errors.New("Push token không hợp lệ")
 	}
 	return s.repo.DeletePushToken(userID, strings.TrimSpace(token))
 }
@@ -75,8 +75,18 @@ func (s *Service) SendPushToUser(
 				Title: title,
 				Body:  body,
 			},
-			Data:    data,
-			Android: &messaging.AndroidConfig{Priority: "high"},
+			Data: data,
+			Android: &messaging.AndroidConfig{
+				Priority: "high",
+				Notification: &messaging.AndroidNotification{
+					ChannelID:             "nfbank_transactions_v2",
+					Sound:                 "default",
+					Priority:              messaging.PriorityHigh,
+					DefaultVibrateTimings: true,
+					DefaultSound:          true,
+					Visibility:            messaging.VisibilityPublic,
+				},
+			},
 		},
 	)
 	if err != nil {
@@ -100,7 +110,7 @@ func (s *Service) CreateNotification(tx *gorm.DB, userID uint, notiType, title, 
 		return errors.New("userID không hợp lệ")
 	}
 	if title == "" || content == "" {
-		return errors.New("tiêu đề và nội dung thông báo không được để trống")
+		return errors.New("Tiêu đề và nội dung thông báo không được để trống")
 	}
 	if notiType == "" {
 		notiType = "BALANCE_FLUCTUATION"
@@ -128,7 +138,7 @@ func (s *Service) GetNotifications(userID uint) ([]Notification, error) {
 // MarkNotificationRead đánh dấu 1 thông báo là đã đọc
 func (s *Service) MarkNotificationRead(id uint, userID uint) error {
 	if id == 0 || userID == 0 {
-		return errors.New("thông tin ID hoặc UserID không hợp lệ")
+		return errors.New("Thông tin ID hoặc UserID không hợp lệ")
 	}
 	return s.repo.MarkAsRead(id, userID)
 }

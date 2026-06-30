@@ -59,18 +59,6 @@ func (r *Repository) FindSessionByID(id uint) (*PaymentSession, error) {
 	return &s, nil
 }
 
-func (r *Repository) FindMerchantByID(id uint) (*Merchant, error) {
-	var m Merchant
-	err := r.db.First(&m, id).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &m, nil
-}
-
 func (r *Repository) FindAccountByID(id uint) (*account.Account, error) {
 	var acc account.Account
 	err := r.db.First(&acc, id).Error

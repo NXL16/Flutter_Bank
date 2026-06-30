@@ -1,6 +1,6 @@
 {
-    "name": "nfbank_mongo",
-    "short_name": "nfbank_mongo",
+    "name": "NF Bank",
+    "short_name": "NF Bank",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

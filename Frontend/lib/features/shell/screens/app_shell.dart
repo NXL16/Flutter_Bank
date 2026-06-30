@@ -7,7 +7,6 @@ import '../../auth/services/auth_service.dart';
 import '../../banking/screens/user_pages.dart' hide TransferPage;
 import '../../notifications/services/push_notification_service.dart';
 import '../../transfers/screens/transfer_page.dart';
-import '../../../shared/widgets/common.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -16,7 +15,8 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  static const _savingsIndex = 4;
   static const _notificationIndex = 5;
   static const _profileIndex = 6;
 
@@ -30,26 +30,32 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadUser();
     _loadShellMetadata();
     PushNotificationService.instance.initialize(
-      onForegroundNotification: (title, body, type) {
+      onForegroundNotification: (_, _, _) {
         if (mounted) {
           setState(() {
             _unreadNotifications++;
             _notificationRevision++;
           });
-          showMessage(
-            context,
-            '$title\n$body',
-            transaction:
-                type == 'BALANCE_FLUCTUATION' ||
-                type == 'PAYMENT_GATEWAY' ||
-                type == 'TRANSACTION',
-          );
         }
       },
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadShellMetadata();
+    }
   }
 
   Future<void> _loadUser() async {
@@ -90,6 +96,8 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _openSavings() => setState(() => _index = _savingsIndex);
+
   void _openProfile() => setState(() => _index = _profileIndex);
 
   Future<void> _logout() async {
@@ -109,7 +117,11 @@ class _AppShellState extends State<AppShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final items = <_NavItem>[
-      const _NavItem('Tổng quan', Icons.grid_view_rounded, DashboardPage()),
+      _NavItem(
+        'Tổng quan',
+        Icons.grid_view_rounded,
+        DashboardPage(onOpenSavings: _openSavings),
+      ),
       const _NavItem(
         'Tài khoản',
         Icons.account_balance_wallet_outlined,
@@ -133,7 +145,10 @@ class _AppShellState extends State<AppShell> {
       _NavItem(
         'Hồ sơ',
         Icons.person_outline_rounded,
-        ProfilePage(onLogout: _logout),
+        ProfilePage(
+          onLogout: _logout,
+          onAvatarChanged: (url) => setState(() => _avatarUrl = url),
+        ),
       ),
     ];
     if (_index >= items.length) _index = 0;
@@ -143,26 +158,37 @@ class _AppShellState extends State<AppShell> {
       appBar: wide
           ? null
           : AppBar(
-              leadingWidth: 56,
+              leadingWidth: 57,
+              titleSpacing: 4,
               leading: IconButton(
                 tooltip: 'Mở hồ sơ',
                 onPressed: _openProfile,
-                icon: CircleAvatar(
-                  radius: 17,
-                  backgroundImage: _avatarUrl.isEmpty
-                      ? null
-                      : NetworkImage(_avatarUrl),
-                  child: _avatarUrl.isEmpty
-                      ? Text(
-                          user.fullName.trim().isEmpty
-                              ? 'N'
-                              : user.fullName.trim()[0].toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        )
-                      : null,
+                icon: Container(
+                  padding: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF8F95FF),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: CircleAvatar(
+                    radius: 15.5,
+                    backgroundImage: _avatarUrl.isEmpty
+                        ? null
+                        : NetworkImage(_avatarUrl),
+                    child: _avatarUrl.isEmpty
+                        ? Text(
+                            user.fullName.trim().isEmpty
+                                ? 'N'
+                                : user.fullName.trim()[0].toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          )
+                        : null,
+                  ),
                 ),
               ),
               title: Text(items[_index].label),

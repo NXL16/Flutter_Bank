@@ -2,7 +2,6 @@ package account
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 )
@@ -15,77 +14,6 @@ func NewService(repo *Repository) *Service {
 	return &Service{
 		repo: repo,
 	}
-}
-
-// CreateAccount tạo account mới cho user
-func (s *Service) CreateAccount(
-	userID uint,
-	req CreateAccountRequest,
-) (*AccountResponse, error) {
-
-	// Validate account type
-	validTypes := map[string]bool{
-		"PAYMENT": true,
-		"SAVINGS": true,
-		"CREDIT":  true,
-	}
-
-	if !validTypes[req.AccountType] {
-		return nil, errors.New("loại tài khoản không hợp lệ")
-	}
-
-	// Mỗi user chỉ được sở hữu tối đa 1 tài khoản cho mỗi loại
-	existingAccount, err := s.repo.FindByUserIDAndType(
-		userID,
-		req.AccountType,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if existingAccount != nil {
-		return nil, fmt.Errorf(
-			"người dùng đã sở hữu tài khoản %s",
-			req.AccountType,
-		)
-	}
-
-	// Validate currency
-	validCurrencies := map[string]bool{
-		"VND": true,
-		"USD": true,
-	}
-
-	if !validCurrencies[req.Currency] {
-		return nil, errors.New("loại tiền tệ không hợp lệ")
-	}
-
-	accountNumber, err := s.generateUniqueAccountNumber(userID)
-	if err != nil {
-		return nil, err
-	}
-
-	account := &Account{
-		UserID:        userID,
-		AccountNumber: accountNumber,
-		AccountType:   req.AccountType,
-		Balance:       0,
-		Currency:      req.Currency,
-		Status:        "ACTIVE",
-	}
-
-	if err := s.repo.CreateAccount(account); err != nil {
-		return nil, err
-	}
-
-	return &AccountResponse{
-		ID:            account.ID,
-		AccountNumber: account.AccountNumber,
-		AccountType:   account.AccountType,
-		Balance:       account.Balance,
-		Currency:      account.Currency,
-		Status:        account.Status,
-	}, nil
 }
 
 // GetUserAccounts lấy danh sách account của user

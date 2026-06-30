@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nfbank_mongo/features/transfers/models/recent_recipient.dart';
+import 'package:nf_bank/features/transfers/models/recent_recipient.dart';
 
 void main() {
   test('keeps unique successful outgoing transfers in newest order', () {

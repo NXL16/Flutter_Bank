@@ -42,21 +42,21 @@ func (s *Service) Transfer(
 	if req.Description == "" {
 		senderName, err := s.repo.GetUserFullName(userID)
 		if err != nil {
-			return nil, errors.New("không thể lấy tên người chuyển khoản")
+			return nil, errors.New("Không thể lấy tên người chuyển khoản")
 		}
 		req.Description = defaultTransferDescription(senderName)
 	}
 	if !regexp.MustCompile(`^[A-Za-z0-9._:-]{16,64}$`).MatchString(req.IdempotencyKey) {
-		return nil, errors.New("thiếu hoặc sai định dạng Idempotency-Key")
+		return nil, errors.New("Thiếu hoặc sai định dạng Idempotency-Key")
 	}
 	if len([]rune(req.Description)) > 140 {
-		return nil, errors.New("nội dung chuyển tiền tối đa 140 ký tự")
+		return nil, errors.New("Nội dung chuyển tiền tối đa 140 ký tự")
 	}
 	if req.Amount < s.cfg.TransferMinAmount {
-		return nil, fmt.Errorf("số tiền chuyển tối thiểu là %d VND", s.cfg.TransferMinAmount)
+		return nil, fmt.Errorf("Số tiền chuyển tối thiểu là %d VND", s.cfg.TransferMinAmount)
 	}
 	if req.Amount > s.cfg.TransferMaxAmount {
-		return nil, fmt.Errorf("số tiền vượt hạn mức mỗi giao dịch %d VND", s.cfg.TransferMaxAmount)
+		return nil, fmt.Errorf("Số tiền vượt hạn mức mỗi giao dịch %d VND", s.cfg.TransferMaxAmount)
 	}
 
 	existing, err := s.repo.FindTransactionByIdempotencyKey(userID, req.IdempotencyKey)
@@ -82,7 +82,7 @@ func (s *Service) Transfer(
 			return err
 		}
 		if senderAccount == nil {
-			return errors.New("không tìm thấy tài khoản gửi")
+			return errors.New("Không tìm thấy tài khoản gửi")
 		}
 
 		// 2. Tìm receiver account (chưa lock) để lấy ID
@@ -91,11 +91,11 @@ func (s *Service) Transfer(
 			return err
 		}
 		if receiverAccount == nil {
-			return errors.New("không tìm thấy tài khoản nhận")
+			return errors.New("Không tìm thấy tài khoản nhận")
 		}
 
 		if senderAccount.ID == receiverAccount.ID {
-			return errors.New("không thể chuyển tiền cho chính tài khoản của mình")
+			return errors.New("Không thể chuyển tiền cho chính tài khoản của mình")
 		}
 
 		// 3. Thực hiện khóa theo thứ tự ID tăng dần để tránh Deadlock
@@ -123,26 +123,26 @@ func (s *Service) Transfer(
 		}
 
 		if lockedSender == nil {
-			return errors.New("không tìm thấy tài khoản gửi")
+			return errors.New("Không tìm thấy tài khoản gửi")
 		}
 		if lockedReceiver == nil {
-			return errors.New("không tìm thấy tài khoản nhận")
+			return errors.New("Không tìm thấy tài khoản nhận")
 		}
 
 		if lockedSender.Status != "ACTIVE" {
-			return errors.New("tài khoản gửi không hoạt động")
+			return errors.New("Tài khoản gửi không hoạt động")
 		}
 
 		if lockedReceiver.Status != "ACTIVE" {
-			return errors.New("tài khoản nhận không hoạt động")
+			return errors.New("Tài khoản nhận không hoạt động")
 		}
 
 		if lockedSender.Currency != lockedReceiver.Currency {
-			return errors.New("không thể chuyển tiền khác loại tiền tệ")
+			return errors.New("Không thể chuyển tiền khác loại tiền tệ")
 		}
 
 		if lockedSender.Balance < req.Amount {
-			return errors.New("số dư không đủ")
+			return errors.New("Số dư không đủ")
 		}
 
 		now := time.Now()
@@ -157,7 +157,7 @@ func (s *Service) Transfer(
 			return err
 		}
 		if usedToday+req.Amount > s.cfg.DailyTransferLimit {
-			return fmt.Errorf("giao dịch vượt hạn mức chuyển tiền trong ngày %d VND", s.cfg.DailyTransferLimit)
+			return fmt.Errorf("Giao dịch vượt hạn mức chuyển tiền trong ngày %d VND", s.cfg.DailyTransferLimit)
 		}
 
 		senderNewBalance := lockedSender.Balance - req.Amount
@@ -281,7 +281,7 @@ func (s *Service) ResolveAccount(
 ) (*AccountResolutionResponse, error) {
 	accountNumber = strings.TrimSpace(accountNumber)
 	if !regexp.MustCompile(`^[0-9]{12}$`).MatchString(accountNumber) {
-		return nil, errors.New("số tài khoản phải gồm 12 chữ số")
+		return nil, errors.New("Số tài khoản phải gồm 12 chữ số")
 	}
 
 	ownAccount, err := s.repo.FindPaymentAccountByUserID(userID)
@@ -289,7 +289,7 @@ func (s *Service) ResolveAccount(
 		return nil, err
 	}
 	if ownAccount != nil && ownAccount.AccountNumber == accountNumber {
-		return nil, errors.New("không thể chuyển tiền cho chính tài khoản của mình")
+		return nil, errors.New("Không thể chuyển tiền cho chính tài khoản của mình")
 	}
 
 	result, err := s.repo.ResolveActivePaymentAccount(accountNumber)
@@ -297,7 +297,7 @@ func (s *Service) ResolveAccount(
 		return nil, err
 	}
 	if result == nil {
-		return nil, errors.New("không tìm thấy tài khoản nhận đang hoạt động")
+		return nil, errors.New("Không tìm thấy tài khoản nhận đang hoạt động")
 	}
 	return result, nil
 }
@@ -316,7 +316,7 @@ func (s *Service) GetMyTransactions(
 	}
 
 	if paymentAccount == nil {
-		return nil, errors.New("không tìm thấy tài khoản PAYMENT")
+		return nil, errors.New("Không tìm thấy tài khoản PAYMENT")
 	}
 
 	transactions, err := s.repo.FindTransactionViewsByAccountID(paymentAccount.ID)
@@ -344,7 +344,7 @@ func (s *Service) GetTransactionDetail(
 	}
 
 	if paymentAccount == nil {
-		return nil, errors.New("không tìm thấy tài khoản PAYMENT")
+		return nil, errors.New("Không tìm thấy tài khoản PAYMENT")
 	}
 
 	transaction, err := s.repo.FindTransactionViewByReferenceCode(paymentAccount.ID, referenceCode)
@@ -353,7 +353,7 @@ func (s *Service) GetTransactionDetail(
 	}
 
 	if transaction == nil {
-		return nil, errors.New("không tìm thấy giao dịch")
+		return nil, errors.New("Không tìm thấy giao dịch")
 	}
 
 	result := mapTransactionView(*transaction)
@@ -367,7 +367,7 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 		return nil, err
 	}
 	if adminPaymentAccount == nil {
-		return nil, errors.New("không tìm thấy tài khoản nguồn PAYMENT của admin (vui lòng liên hệ hỗ trợ)")
+		return nil, errors.New("Không tìm thấy tài khoản nguồn PAYMENT của admin (vui lòng liên hệ hỗ trợ)")
 	}
 
 	// 2. Tìm tài khoản nhận (PAYMENT) của User bằng số tài khoản
@@ -376,11 +376,11 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 		return nil, err
 	}
 	if receiverAccount == nil {
-		return nil, errors.New("không tìm thấy số tài khoản người nhận")
+		return nil, errors.New("Không tìm thấy số tài khoản người nhận")
 	}
 
 	if adminPaymentAccount.ID == receiverAccount.ID {
-		return nil, errors.New("không thể tự nạp tiền cho chính tài khoản Admin của mình")
+		return nil, errors.New("Không thể tự nạp tiền cho chính tài khoản Admin của mình")
 	}
 
 	// 3. Tìm thông tin tên Admin để ghi nhận lịch sử kiểm toán (audit log)
@@ -389,7 +389,7 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 	}
 	err = s.repo.db.Table("users").Where("id = ?", adminUserID).First(&adminUser).Error
 	if err != nil {
-		return nil, errors.New("không thể tìm thấy thông tin định danh của admin thực hiện")
+		return nil, errors.New("Không thể tìm thấy thông tin định danh của admin thực hiện")
 	}
 
 	var transactionResult *Transaction
@@ -418,15 +418,15 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 		}
 
 		if lockedAdmin == nil || lockedReceiver == nil {
-			return errors.New("không tìm thấy thông tin tài khoản")
+			return errors.New("Không tìm thấy thông tin tài khoản")
 		}
 
 		if lockedReceiver.Status != "ACTIVE" {
-			return errors.New("tài khoản người nhận đang bị khóa hoặc không hoạt động")
+			return errors.New("Tài khoản người nhận đang bị khóa hoặc không hoạt động")
 		}
 
 		if lockedAdmin.Currency != lockedReceiver.Currency {
-			return errors.New("không thể chuyển tiền khác loại tiền tệ")
+			return errors.New("Không thể chuyển tiền khác loại tiền tệ")
 		}
 
 		// Nạp tiền: Ví Admin giảm (cho phép âm), ví User tăng

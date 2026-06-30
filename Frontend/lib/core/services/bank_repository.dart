@@ -13,6 +13,24 @@ class BankRepository {
   Future<void> updateProfile(Map<String, dynamic> body) async =>
       ApiService.put(ApiUrl.profile, body: body);
 
+  Future<String> uploadAvatar({
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final result = await ApiService.uploadFile(
+      ApiUrl.profileAvatar,
+      fieldName: 'file',
+      bytes: bytes,
+      filename: filename,
+    );
+    final data = _map(result.data);
+    final avatarURL = data['avatar_url']?.toString() ?? '';
+    if (!avatarURL.startsWith('https://')) {
+      throw const ApiException('Server không trả về URL ảnh đại diện hợp lệ');
+    }
+    return avatarURL;
+  }
+
   Future<List<Map<String, dynamic>>> transactions() async =>
       _list((await ApiService.get(ApiUrl.transactions, auth: true)).data);
 
@@ -41,13 +59,32 @@ class BankRepository {
     )).data,
   );
 
-  Future<Map<String, dynamic>> openSavings(int amount) async => _map(
+  Future<Map<String, dynamic>> openSavings({
+    required int amount,
+    required int termMonths,
+    required String maturityInstruction,
+    required String transactionPin,
+    required String idempotencyKey,
+  }) async => _map(
     (await ApiService.post(
       ApiUrl.savings,
       auth: true,
-      body: {'amount': amount},
+      headers: {'Idempotency-Key': idempotencyKey},
+      body: {
+        'amount': amount,
+        'term_months': termMonths,
+        'maturity_instruction': maturityInstruction,
+        'transaction_pin': transactionPin,
+      },
     )).data,
   );
+
+  Future<List<Map<String, dynamic>>> savingsProducts() async => _list(
+    (await ApiService.get('${ApiUrl.savings}/products', auth: true)).data,
+  );
+
+  Future<List<Map<String, dynamic>>> savingsAccounts() async =>
+      _list((await ApiService.get(ApiUrl.savings, auth: true)).data);
 
   Future<List<Map<String, dynamic>>> notifications() async =>
       _list((await ApiService.get(ApiUrl.notifications, auth: true)).data);

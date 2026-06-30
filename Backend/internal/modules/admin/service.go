@@ -46,15 +46,12 @@ func (s *Service) GetUserByID(userID uint) (*AdminUserResponse, error) {
 	}
 
 	return &AdminUserResponse{
-		ID:             user.ID,
-		FullName:       user.FullName,
-		Phone:          user.Phone,
-		Role:           user.Role,
-		IsVerified:     user.IsVerified,
-		IsLocked:       user.IsLocked,
-		SessionVersion: user.SessionVersion,
-		CreatedAt:      user.CreatedAt,
-		UpdatedAt:      user.UpdatedAt,
+		ID:         user.ID,
+		FullName:   user.FullName,
+		Phone:      user.Phone,
+		Role:       user.Role,
+		IsVerified: user.IsVerified,
+		IsLocked:   user.IsLocked,
 	}, nil
 }
 
@@ -65,11 +62,11 @@ func (s *Service) LockUser(userID uint) error {
 	}
 
 	if user.Role != "user" {
-		return errors.New("không thể khóa tài khoản quản trị viên")
+		return errors.New("Không thể khóa tài khoản quản trị viên")
 	}
 
 	if user.IsLocked {
-		return errors.New("tài khoản đã bị khóa")
+		return errors.New("Tài khoản đã bị khóa")
 	}
 
 	return s.repo.LockUser(userID)
@@ -82,7 +79,7 @@ func (s *Service) UnlockUser(userID uint) error {
 	}
 
 	if !user.IsLocked {
-		return errors.New("tài khoản chưa bị khóa")
+		return errors.New("Tài khoản chưa bị khóa")
 	}
 
 	return s.repo.UnlockUser(userID)
@@ -90,28 +87,13 @@ func (s *Service) UnlockUser(userID uint) error {
 
 func mapUserToAdminResponse(user auth.User) AdminUserResponse {
 	return AdminUserResponse{
-		ID:             user.ID,
-		FullName:       user.FullName,
-		Phone:          user.Phone,
-		Role:           user.Role,
-		IsVerified:     user.IsVerified,
-		IsLocked:       user.IsLocked,
-		SessionVersion: user.SessionVersion,
-		CreatedAt:      user.CreatedAt,
-		UpdatedAt:      user.UpdatedAt,
+		ID:         user.ID,
+		FullName:   user.FullName,
+		Phone:      user.Phone,
+		Role:       user.Role,
+		IsVerified: user.IsVerified,
+		IsLocked:   user.IsLocked,
 	}
-}
-
-func (s *Service) CreateUserAccount(
-	userID uint,
-	accountType string,
-	currency string,
-) (*account.AccountResponse, error) {
-	req := account.CreateAccountRequest{
-		AccountType: accountType,
-		Currency:    currency,
-	}
-	return s.accountService.CreateAccount(userID, req)
 }
 
 func (s *Service) GetUserAccounts(
@@ -127,7 +109,7 @@ func (s *Service) CreateAdmin(req CreateAdminRequest) (*CreateAdminResponse, err
 		return nil, err
 	}
 	if existingUser != nil {
-		return nil, errors.New("số điện thoại đã được sử dụng")
+		return nil, errors.New("Số điện thoại đã được sử dụng")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -139,7 +121,6 @@ func (s *Service) CreateAdmin(req CreateAdminRequest) (*CreateAdminResponse, err
 
 	adminUser := &auth.User{
 		FullName:     req.FullName,
-		Email:        normalizePhone(phone) + "@phone.identity",
 		Phone:        phone,
 		PasswordHash: string(hashedPassword),
 		Role:         "admin",

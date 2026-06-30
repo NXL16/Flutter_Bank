@@ -11,12 +11,9 @@ type Repository struct {
 }
 
 type BasicUserInfo struct {
-	ID         uint
-	FullName   string
-	Phone      string
-	Role       string
-	IsVerified bool
-	IsLocked   bool
+	FullName string
+	Phone    string
+	Role     string
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -68,12 +65,19 @@ func (r *Repository) UpdateProfile(
 		}).Error
 }
 
+func (r *Repository) UpdateAvatarURL(userID uint, avatarURL string) error {
+	return r.db.
+		Model(&UserProfile{}).
+		Where("user_id = ?", userID).
+		Update("avatar_url", avatarURL).Error
+}
+
 func (r *Repository) FindBasicUserInfo(userID uint) (*BasicUserInfo, error) {
 	var user BasicUserInfo
 
 	err := r.db.
 		Table("users").
-		Select("id, full_name, phone, role, is_verified, is_locked").
+		Select("full_name, phone, role").
 		Where("id = ?", userID).
 		First(&user).Error
 

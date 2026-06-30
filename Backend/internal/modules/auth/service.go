@@ -75,7 +75,7 @@ func (s *Service) Register(req RegisterRequest) error {
 		return err
 	}
 	if normalizePhone(verifiedPhone) != normalizePhone(formattedPhone) {
-		return errors.New("số điện thoại xác thực không khớp với số đăng ký")
+		return errors.New("Số điện thoại xác thực không khớp với số đăng ký")
 	}
 
 	existingPhone, err := s.repo.FindUserByPhone(formattedPhone)
@@ -83,7 +83,7 @@ func (s *Service) Register(req RegisterRequest) error {
 		return err
 	}
 	if existingPhone != nil {
-		return errors.New("số điện thoại đã được sử dụng")
+		return errors.New("Số điện thoại đã được sử dụng")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -94,11 +94,7 @@ func (s *Service) Register(req RegisterRequest) error {
 		return err
 	}
 
-	// Cột email được giữ tạm để tương thích migration dữ liệu cũ, nhưng không
-	// còn được dùng làm định danh hay hiển thị cho khách hàng.
-	internalIdentity := fmt.Sprintf("%s@phone.identity", normalizePhone(formattedPhone))
 	user := &User{
-		Email:        internalIdentity,
 		FullName:     strings.TrimSpace(req.FullName),
 		Phone:        formattedPhone,
 		PasswordHash: string(hashedPassword),
@@ -124,15 +120,15 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 	}
 
 	if user == nil {
-		return nil, errors.New("tài khoản hoặc mật khẩu không đúng")
+		return nil, errors.New("Tài khoản hoặc mật khẩu không đúng")
 	}
 
 	if user.IsLocked {
-		return nil, errors.New("tài khoản đã bị khóa")
+		return nil, errors.New("Tài khoản đã bị khóa")
 	}
 
 	if !user.IsVerified {
-		return nil, errors.New("tài khoản chưa được xác thực")
+		return nil, errors.New("Tài khoản chưa được xác thực")
 	}
 
 	err = bcrypt.CompareHashAndPassword(
@@ -140,7 +136,7 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 		[]byte(req.Password),
 	)
 	if err != nil {
-		return nil, errors.New("tài khoản hoặc mật khẩu không đúng")
+		return nil, errors.New("Tài khoản hoặc mật khẩu không đúng")
 	}
 
 	// Phân loại xử lý dựa trên vai trò
@@ -151,7 +147,7 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 		}
 
 		if !totp.ValidateCode(user.TOTPSecret, req.TOTPCode) {
-			return nil, errors.New("mã xác thực TOTP không đúng hoặc đã hết hạn")
+			return nil, errors.New("Mã xác thực TOTP không đúng hoặc đã hết hạn")
 		}
 
 		// Tạo Access Token và Refresh Token ngay lập tức cho Admin/Super Admin
@@ -218,7 +214,7 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 func validatePassword(password string) error {
 	// Tối thiểu 8 ký tự
 	if len(password) < 8 {
-		return errors.New("mật khẩu phải có ít nhất 8 ký tự")
+		return errors.New("Mật khẩu phải có ít nhất 8 ký tự")
 	}
 
 	// Ít nhất 1 chữ hoa
@@ -229,7 +225,7 @@ func validatePassword(password string) error {
 
 	if !hasUppercase || !hasSpecialChar {
 		return errors.New(
-			"mật khẩu phải có ít nhất 1 chữ hoa và 1 ký tự đặc biệt",
+			"Mật khẩu phải có ít nhất 1 chữ hoa và 1 ký tự đặc biệt",
 		)
 	}
 	return nil
@@ -254,7 +250,7 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 		s.cfg.RefreshTokenSecret,
 	)
 	if err != nil {
-		return nil, errors.New("refresh token không hợp lệ hoặc đã hết hạn")
+		return nil, errors.New("Refresh token không hợp lệ hoặc đã hết hạn")
 	}
 
 	refreshTokenHash := sha256.Sum256([]byte(refreshToken))
@@ -263,7 +259,7 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 		return nil, err
 	}
 	if storedToken == nil || storedToken.UserID != claims.UserID {
-		return nil, errors.New("phiên đăng nhập không tồn tại hoặc đã bị thu hồi")
+		return nil, errors.New("Phiên đăng nhập không tồn tại hoặc đã bị thu hồi")
 	}
 
 	user, err := s.repo.FindUserByID(claims.UserID)
@@ -272,14 +268,14 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*AuthResponse, error)
 	}
 
 	if user == nil {
-		return nil, errors.New("người dùng không tồn tại")
+		return nil, errors.New("Người dùng không tồn tại")
 	}
 
 	if user.IsLocked {
-		return nil, errors.New("tài khoản đã bị khóa")
+		return nil, errors.New("Tài khoản đã bị khóa")
 	}
 	if claims.SessionVersion != user.SessionVersion {
-		return nil, errors.New("phiên đăng nhập đã hết hiệu lực")
+		return nil, errors.New("Phiên đăng nhập đã hết hiệu lực")
 	}
 
 	accessToken, err := jwtProvider.GenerateAccessToken(
@@ -317,7 +313,7 @@ func (s *Service) ChangePassword(userID uint, req ChangePasswordRequest) error {
 	}
 
 	if user.IsLocked {
-		return errors.New("tài khoản đã bị khóa")
+		return errors.New("Tài khoản đã bị khóa")
 	}
 
 	err = bcrypt.CompareHashAndPassword(
@@ -325,15 +321,23 @@ func (s *Service) ChangePassword(userID uint, req ChangePasswordRequest) error {
 		[]byte(req.OldPassword),
 	)
 	if err != nil {
-		return errors.New("mật khẩu cũ không đúng")
+		return errors.New("Mật khẩu cũ không đúng")
 	}
 
 	if req.OldPassword == req.NewPassword {
-		return errors.New("mật khẩu mới không được trùng mật khẩu cũ")
+		return errors.New("Mật khẩu mới không được trùng mật khẩu cũ")
 	}
 
 	if err := validatePassword(req.NewPassword); err != nil {
 		return err
+	}
+
+	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
+	if err != nil {
+		return errors.New("Mã xác thực OTP không hợp lệ hoặc đã hết hạn")
+	}
+	if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
+		return errors.New("Số điện thoại xác thực không khớp với tài khoản")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -364,7 +368,7 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 	}
 
 	if user == nil {
-		return errors.New("thông tin xác thực không hợp lệ")
+		return errors.New("Thông tin xác thực không hợp lệ")
 	}
 
 	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
@@ -372,7 +376,7 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 		return err
 	}
 	if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
-		return errors.New("số điện thoại xác thực không khớp với tài khoản")
+		return errors.New("Số điện thoại xác thực không khớp với tài khoản")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -399,15 +403,15 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		return nil, err
 	}
 	if user == nil {
-		return nil, errors.New("người dùng không tồn tại")
+		return nil, errors.New("Người dùng không tồn tại")
 	}
 
 	if user.IsLocked {
-		return nil, errors.New("tài khoản đã bị khóa")
+		return nil, errors.New("Tài khoản đã bị khóa")
 	}
 
 	if !user.IsVerified {
-		return nil, errors.New("tài khoản chưa được xác thực")
+		return nil, errors.New("Tài khoản chưa được xác thực")
 	}
 
 	verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
@@ -415,7 +419,7 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		return nil, err
 	}
 	if normalizePhone(verifiedPhone) != normalizePhone(user.Phone) {
-		return nil, errors.New("số điện thoại xác thực không khớp với tài khoản")
+		return nil, errors.New("Số điện thoại xác thực không khớp với tài khoản")
 	}
 
 	// 1. Tự động dọn dẹp các thiết bị tin cậy cũ quá 30 ngày của user này
@@ -459,8 +463,7 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 		}
 	}
 
-	// OTP điện thoại vừa xác minh chính chủ, vì vậy thiết bị mới được đăng ký
-	// trực tiếp thay vì tiếp tục yêu cầu phê duyệt qua email.
+	// OTP điện thoại vừa xác minh chính chủ, vì vậy đăng ký thiết bị mới.
 	if !isTrusted {
 		newDeviceID := deviceID
 		if newDeviceID == "" {
@@ -539,7 +542,7 @@ func (s *Service) ConfirmLogin(req ConfirmLoginRequest, userAgent string, ipAddr
 
 func resolveLocation(ip string) string {
 	if ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
-		return "Cục bộ (Thiết bị thử nghiệm)"
+		return "Thiết bị thử nghiệm"
 	}
 
 	// Kiểm tra nếu là IP mạng nội bộ (LAN / Wi-Fi)
@@ -600,7 +603,7 @@ func validateVietnamPhone(phone string) error {
 	}
 
 	if !matched {
-		return errors.New("số điện thoại không đúng định dạng nhà mạng Việt Nam")
+		return errors.New("Số điện thoại không đúng định dạng nhà mạng Việt Nam")
 	}
 
 	return nil
@@ -617,42 +620,4 @@ func normalizePhone(phone string) string {
 		return digits[1:]
 	}
 	return digits
-}
-
-func parseUserAgent(ua string) string {
-	if ua == "" {
-		return "Thiết bị không xác định"
-	}
-
-	// Xác định hệ điều hành
-	os := "Thiết bị không xác định"
-	if strings.Contains(ua, "Windows NT") {
-		os = "Máy tính Windows"
-	} else if strings.Contains(ua, "Macintosh") || strings.Contains(ua, "Mac OS X") {
-		os = "Máy tính macOS"
-	} else if strings.Contains(ua, "iPhone") {
-		os = "Điện thoại iPhone"
-	} else if strings.Contains(ua, "iPad") {
-		os = "Máy tính bảng iPad"
-	} else if strings.Contains(ua, "Android") {
-		os = "Điện thoại Android"
-	} else if strings.Contains(ua, "Linux") {
-		os = "Thiết bị Linux"
-	}
-
-	// Xác định trình duyệt
-	browser := "Trình duyệt ẩn danh/khác"
-	if strings.Contains(ua, "Chrome") && !strings.Contains(ua, "Edg") && !strings.Contains(ua, "OPR") {
-		browser = "Google Chrome"
-	} else if strings.Contains(ua, "Safari") && !strings.Contains(ua, "Chrome") {
-		browser = "Apple Safari"
-	} else if strings.Contains(ua, "Firefox") {
-		browser = "Mozilla Firefox"
-	} else if strings.Contains(ua, "Edg") {
-		browser = "Microsoft Edge"
-	} else if strings.Contains(ua, "OPR") || strings.Contains(ua, "Opera") {
-		browser = "Opera"
-	}
-
-	return fmt.Sprintf("%s (%s)", browser, os)
 }

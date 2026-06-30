@@ -18,6 +18,5 @@ func RegisterRoutes(
 	accountGroup.Use(middleware.AuthMiddleware(cfg))
 	{
 		accountGroup.GET("", handler.GetMyAccounts)
-		accountGroup.POST("", handler.CreateAccount)
 	}
 }

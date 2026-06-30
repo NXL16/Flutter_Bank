@@ -65,6 +65,64 @@ class ApiService {
     bool auth = true,
   }) => _request('DELETE', url, body: body, auth: auth);
 
+  static Future<ApiResult> uploadFile(
+    String url, {
+    required String fieldName,
+    required List<int> bytes,
+    required String filename,
+    bool auth = true,
+    bool retry = true,
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse(url));
+    if (auth) {
+      final token = await TokenStorage.getToken();
+      if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(fieldName, bytes, filename: filename),
+    );
+
+    http.Response response;
+    try {
+      response = await http.Response.fromStream(await _client.send(request));
+    } catch (_) {
+      throw ApiException('Không thể kết nối ${ApiUrl.baseUrl}.');
+    }
+    if (response.statusCode == 401 && auth && retry && await _tryRefresh()) {
+      return uploadFile(
+        url,
+        fieldName: fieldName,
+        bytes: bytes,
+        filename: filename,
+        auth: auth,
+        retry: false,
+      );
+    }
+
+    dynamic decoded;
+    try {
+      decoded = response.body.isEmpty ? null : jsonDecode(response.body);
+    } catch (_) {
+      decoded = response.body;
+    }
+    final map = decoded is Map<String, dynamic> ? decoded : null;
+    final message =
+        map?['message']?.toString() ??
+        (response.statusCode >= 400
+            ? 'Tải tệp không thành công'
+            : 'Thành công');
+    final result = ApiResult(
+      statusCode: response.statusCode,
+      message: message,
+      data: map != null && map.containsKey('data') ? map['data'] : decoded,
+      raw: decoded,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(message, statusCode: response.statusCode);
+    }
+    return result;
+  }
+
   static Future<ApiResult> _request(
     String method,
     String url, {

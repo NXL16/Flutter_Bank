@@ -7,11 +7,11 @@ import (
 
 	"bank-service/internal/config"
 	"bank-service/internal/database"
+	"bank-service/internal/infrastructure/cloudinary"
 	"bank-service/internal/infrastructure/firebase"
 	"bank-service/internal/modules/account"
 	"bank-service/internal/modules/admin"
 	"bank-service/internal/modules/auth"
-	"bank-service/internal/modules/credit"
 	"bank-service/internal/modules/notification"
 	"bank-service/internal/modules/payment"
 	"bank-service/internal/modules/savings"
@@ -25,21 +25,31 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 
-	database.ConnectMongoDB(cfg.MongoURI, cfg.MongoDBName)
-
 	dsn := cfg.GetMySQLDSN()
 	database.ConnectMySQL(dsn)
+
+	// Phiên bản cũ giới hạn một tài khoản SAVINGS cho mỗi người. Bỏ unique
+	// index này trước khi migrate để hỗ trợ nhiều sổ tiết kiệm độc lập.
+	if database.DB.Migrator().HasTable(&account.Account{}) &&
+		database.DB.Migrator().HasIndex(&account.Account{}, "idx_user_account_type") {
+		if !database.DB.Migrator().HasIndex(&account.Account{}, "idx_accounts_user_type") {
+			if err := database.DB.Migrator().CreateIndex(&account.Account{}, "idx_accounts_user_type"); err != nil {
+				log.Fatalf("Không thể tạo index tài khoản thay thế: %v", err)
+			}
+		}
+		if err := database.DB.Migrator().DropIndex(&account.Account{}, "idx_user_account_type"); err != nil {
+			log.Fatalf("Không thể bỏ giới hạn một sổ tiết kiệm: %v", err)
+		}
+	}
 
 	if err := database.DB.AutoMigrate(
 		&auth.User{},
 		&auth.RefreshToken{},
 		&auth.UserDevice{},
-		&auth.PendingLogin{},
 		&notification.Notification{},
 		&notification.PushToken{},
 		&account.Account{},
 		&savings.SavingsDetail{},
-		&credit.CreditDetail{},
 		&user.UserProfile{},
 		&transaction.Transaction{},
 		&transaction.LedgerEntry{},
@@ -81,7 +91,6 @@ func main() {
 			}
 			superAdmin := auth.User{
 				FullName:     "Super Admin",
-				Email:        "84999999999@phone.identity",
 				PasswordHash: string(hashedPassword),
 				Phone:        "+84999999999",
 				Role:         "super_admin",
@@ -98,7 +107,12 @@ func main() {
 	}
 
 	userRepo := user.NewRepository(database.DB)
-	userService := user.NewService(userRepo)
+	cloudinaryClient := cloudinary.NewClient(
+		cfg.CloudinaryCloudName,
+		cfg.CloudinaryAPIKey,
+		cfg.CloudinaryAPISecret,
+	)
+	userService := user.NewService(userRepo, cloudinaryClient)
 
 	authService := auth.NewService(
 		authRepo,
@@ -132,7 +146,7 @@ func main() {
 
 	// Khởi tạo savings module
 	savingsRepo := savings.NewRepository(database.DB)
-	savingsService := savings.NewService(savingsRepo, notificationService)
+	savingsService := savings.NewService(savingsRepo, notificationService, transactionService)
 	savingsHandler := savings.NewHandler(savingsService)
 
 	api := r.Group("/api/v1")

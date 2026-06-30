@@ -64,15 +64,30 @@ class AuthService {
     body: {'phone': phone, 'id_token': idToken, 'new_password': password},
   );
 
-  Future<void> changePassword(String oldPassword, String newPassword) async =>
-      ApiService.put(
-        ApiUrl.changePassword,
-        body: {'old_password': oldPassword, 'new_password': newPassword},
-      );
+  Future<void> changePassword(
+    String oldPassword,
+    String newPassword,
+    String idToken,
+  ) async {
+    await ApiService.put(
+      ApiUrl.changePassword,
+      body: {
+        'old_password': oldPassword,
+        'new_password': newPassword,
+        'id_token': idToken,
+      },
+    );
+    // Backend thu hồi toàn bộ phiên sau khi đổi mật khẩu. Xóa phiên cục bộ
+    // ngay tại service để ứng dụng không thể giữ token vừa hết hiệu lực.
+    await TokenStorage.clearAuth();
+  }
 
   Future<void> logout() async {
     try {
       await ApiService.post(ApiUrl.logout);
+    } on ApiException {
+      // Logout phía server là best-effort: token có thể đã bị thu hồi do đổi
+      // mật khẩu hoặc hết hạn. Người dùng vẫn phải được thoát khỏi ứng dụng.
     } finally {
       await TokenStorage.clearAuth();
     }

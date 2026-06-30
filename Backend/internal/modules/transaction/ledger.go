@@ -19,13 +19,13 @@ func CreateDoubleEntry(
 	creditBalanceAfter int64,
 ) error {
 	if tx == nil || transactionID == 0 || debitAccountID == 0 || creditAccountID == 0 {
-		return errors.New("thông tin bút toán không hợp lệ")
+		return errors.New("Thông tin bút toán không hợp lệ")
 	}
 	if debitAccountID == creditAccountID {
-		return errors.New("tài khoản ghi nợ và ghi có phải khác nhau")
+		return errors.New("Tài khoản ghi nợ và ghi có phải khác nhau")
 	}
 	if amount <= 0 || currency == "" {
-		return errors.New("số tiền hoặc loại tiền bút toán không hợp lệ")
+		return errors.New("Số tiền hoặc loại tiền bút toán không hợp lệ")
 	}
 
 	entries := []LedgerEntry{

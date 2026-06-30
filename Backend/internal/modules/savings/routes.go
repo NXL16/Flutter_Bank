@@ -15,6 +15,8 @@ func RegisterRoutes(
 	savingsGroup := r.Group("/savings")
 	savingsGroup.Use(middleware.AuthMiddleware(cfg))
 	{
+		savingsGroup.GET("/products", handler.GetProducts)
+		savingsGroup.GET("", handler.GetMySavings)
 		savingsGroup.POST("", handler.OpenSavings)
 	}
 }

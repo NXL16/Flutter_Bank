@@ -19,5 +19,6 @@ func RegisterRoutes(
 	{
 		userGroup.GET("/me", handler.GetMyProfile)
 		userGroup.PUT("/me", handler.UpdateMyProfile)
+		userGroup.POST("/me/avatar", handler.UploadMyAvatar)
 	}
 }

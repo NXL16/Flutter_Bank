@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"bank-service/internal/modules/account"
 	"bank-service/internal/modules/transaction"
 
 	"github.com/gin-gonic/gin"
@@ -114,44 +113,6 @@ func (h *Handler) UnlockUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Mở khóa tài khoản người dùng thành công",
-	})
-}
-
-func (h *Handler) CreateUserAccount(c *gin.Context) {
-	var req account.CreateAccountRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Dữ liệu không hợp lệ",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	userIDParam := c.Param("id")
-	userID64, err := strconv.ParseUint(userIDParam, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "ID người dùng không hợp lệ",
-		})
-		return
-	}
-
-	accResponse, err := h.service.CreateUserAccount(uint(userID64), req.AccountType, req.Currency)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"message": "Mở tài khoản thành công",
-		"data":    accResponse,
 	})
 }
 

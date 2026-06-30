@@ -32,7 +32,7 @@ func ValidateCode(secret string, code string) bool {
 	}
 
 	currentTime := time.Now().Unix()
-	
+
 	// Cho phép sai số lệch thời gian +/- 30 giây (offset -1, 0, 1)
 	for _, offset := range []int64{-1, 0, 1} {
 		step := (currentTime / 30) + offset

@@ -104,7 +104,7 @@ func ValidateToken(
 
 			// Chỉ chấp nhận HS256
 			if token.Method != jwt.SigningMethodHS256 {
-				return nil, errors.New("invalid signing method")
+				return nil, errors.New("Invalid signing method")
 			}
 
 			return []byte(secret), nil
@@ -118,7 +118,7 @@ func ValidateToken(
 	// Ép kiểu claims
 	claims, ok := token.Claims.(*CustomClaims)
 	if !ok || !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, errors.New("Invalid token")
 	}
 
 	return claims, nil

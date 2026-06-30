@@ -46,14 +46,14 @@ func (s *Service) CreatePayment(req CreatePaymentRequest) (*CreatePaymentRespons
 		return nil, err
 	}
 	if merchant == nil {
-		return nil, errors.New("đối tác không tồn tại hoặc sai Access Key")
+		return nil, errors.New("Đối tác không tồn tại hoặc sai Access Key")
 	}
 
 	// Xác thực chữ ký số (Signature)
 	rawStr := buildCreatePaymentRawString(req)
 	expectedSignature := calculateHMACSHA256(rawStr, merchant.SecretKey)
 	if req.Signature != expectedSignature {
-		return nil, errors.New("chữ ký số (signature) không hợp lệ")
+		return nil, errors.New("Chữ ký số (signature) không hợp lệ")
 	}
 
 	token := generateUUID()
@@ -105,7 +105,7 @@ func (s *Service) GetPaymentSession(token string) (*PaymentSessionResponse, erro
 		return nil, err
 	}
 	if session == nil {
-		return nil, errors.New("phiên giao dịch không tồn tại hoặc đã hết hạn")
+		return nil, errors.New("Phiên giao dịch không tồn tại hoặc đã hết hạn")
 	}
 
 	return &PaymentSessionResponse{
@@ -124,64 +124,64 @@ func (s *Service) ConfirmPayment(userID uint, req ConfirmPaymentRequest) (*strin
 	// 1. Xác thực OTP
 	userPhone, err := s.repo.GetUserPhone(userID)
 	if err != nil {
-		return nil, errors.New("không tìm thấy thông tin số điện thoại người dùng")
+		return nil, errors.New("Không tìm thấy thông tin số điện thoại người dùng")
 	}
 
 	if req.IDToken != "" {
 		verifiedPhone, err := s.firebaseClient.VerifyIDToken(req.IDToken)
 		if err != nil {
-			return nil, fmt.Errorf("xác thực OTP thất bại: %v", err)
+			return nil, fmt.Errorf("Xác thực OTP thất bại: %v", err)
 		}
 		if normalizePhone(verifiedPhone) != normalizePhone(userPhone) {
-			return nil, errors.New("số điện thoại xác thực không khớp với tài khoản")
+			return nil, errors.New("Số điện thoại xác thực không khớp với tài khoản")
 		}
 	} else if s.cfg.AllowTestPaymentOTP && req.OTP == "123456" {
 		// Chỉ được bật rõ ràng trong môi trường phát triển.
 	} else {
-		return nil, errors.New("yêu cầu xác thực OTP để tiếp tục giao dịch")
+		return nil, errors.New("Yêu cầu xác thực OTP để tiếp tục giao dịch")
 	}
 
 	// 2. Tìm phiên giao dịch
 	session, err := s.repo.FindSessionByToken(req.PaymentToken)
 	if err != nil || session == nil {
-		return nil, errors.New("phiên thanh toán không tồn tại")
+		return nil, errors.New("Phiên thanh toán không tồn tại")
 	}
 
 	if session.Status != "PENDING" {
-		return nil, fmt.Errorf("giao dịch đã được xử lý (trạng thái: %s)", session.Status)
+		return nil, fmt.Errorf("Giao dịch đã được xử lý (trạng thái: %s)", session.Status)
 	}
 
 	if time.Now().After(session.ExpiresAt) {
 		_ = s.repo.UpdateSessionStatus(session.ID, "FAILED")
-		return nil, errors.New("phiên thanh toán đã hết hạn")
+		return nil, errors.New("Phiên thanh toán đã hết hạn")
 	}
 
 	// 3. Tài khoản của User thanh toán
 	userAccount, err := s.repo.FindAccountByIDAndUserID(req.PaymentAccountID, userID)
 	if err != nil || userAccount == nil {
-		return nil, errors.New("tài khoản thanh toán không hợp lệ")
+		return nil, errors.New("Tài khoản thanh toán không hợp lệ")
 	}
 
 	if userAccount.AccountType != "PAYMENT" {
-		return nil, errors.New("chỉ hỗ trợ thanh toán từ tài khoản PAYMENT")
+		return nil, errors.New("Chỉ hỗ trợ thanh toán từ tài khoản PAYMENT")
 	}
 
 	if userAccount.Status != "ACTIVE" {
-		return nil, errors.New("tài khoản thanh toán của bạn đang bị khóa")
+		return nil, errors.New("Tài khoản thanh toán của bạn đang bị khóa")
 	}
 
 	// 4. Tài khoản ví tích lũy của Merchant
 	merchantAccount, err := s.repo.FindAccountByID(session.Merchant.PaymentAccountID)
 	if err != nil || merchantAccount == nil {
-		return nil, errors.New("tài khoản ví thụ hưởng của đối tác không hợp lệ")
+		return nil, errors.New("Tài khoản ví thụ hưởng của đối tác không hợp lệ")
 	}
 
 	if userAccount.Balance < session.Amount {
-		return nil, errors.New("số dư tài khoản không đủ để thanh toán")
+		return nil, errors.New("Số dư tài khoản không đủ để thanh toán")
 	}
 
 	if userAccount.Currency != merchantAccount.Currency {
-		return nil, errors.New("không hỗ trợ thanh toán khác loại tiền tệ")
+		return nil, errors.New("Không hỗ trợ thanh toán khác loại tiền tệ")
 	}
 
 	var refCode string
@@ -212,7 +212,7 @@ func (s *Service) ConfirmPayment(userID uint, req ConfirmPaymentRequest) (*strin
 		}
 
 		if lockedUser.Balance < session.Amount {
-			return errors.New("số dư tài khoản không đủ")
+			return errors.New("Số dư tài khoản không đủ")
 		}
 
 		userNewBalance := lockedUser.Balance - session.Amount
@@ -294,7 +294,7 @@ func (s *Service) GetPaymentStatus(partnerCode, orderID, requestID, signature st
 	var m Merchant
 	err := s.repo.db.Where("partner_code = ?", partnerCode).First(&m).Error
 	if err != nil {
-		return nil, errors.New("đối tác không tồn tại")
+		return nil, errors.New("Đối tác không tồn tại")
 	}
 	merchant = &m
 
@@ -302,7 +302,7 @@ func (s *Service) GetPaymentStatus(partnerCode, orderID, requestID, signature st
 	rawStr := buildStatusRequestRawString(orderID, partnerCode, requestID)
 	expectedSignature := calculateHMACSHA256(rawStr, merchant.SecretKey)
 	if signature != expectedSignature {
-		return nil, errors.New("chữ ký số đối soát không hợp lệ")
+		return nil, errors.New("Chữ ký số đối soát không hợp lệ")
 	}
 
 	// Tìm session
@@ -352,7 +352,7 @@ func (s *Service) GetPaymentStatus(partnerCode, orderID, requestID, signature st
 func (s *Service) TriggerWebhook(sessionID uint) {
 	session, err := s.repo.FindSessionByID(sessionID)
 	if err != nil || session == nil {
-		fmt.Printf("⚠️ [IPN] Không tìm thấy phiên giao dịch ID: %d\n", sessionID)
+		fmt.Printf("[IPN] Không tìm thấy phiên giao dịch ID: %d\n", sessionID)
 		return
 	}
 
@@ -381,7 +381,7 @@ func (s *Service) TriggerWebhook(sessionID uint) {
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Printf("⚠️ [IPN] Marshalling JSON failed: %v\n", err)
+		fmt.Printf("[IPN] Marshalling JSON failed: %v\n", err)
 		return
 	}
 
@@ -390,11 +390,11 @@ func (s *Service) TriggerWebhook(sessionID uint) {
 	backoff := []time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute, 5 * time.Minute}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		fmt.Printf("📣 [IPN] Đang gửi Webhook (lần %d) cho OrderID: %s sang URL: %s...\n", attempt+1, session.OrderID, session.IpnURL)
+		fmt.Printf("[IPN] Đang gửi Webhook (lần %d) cho OrderID: %s sang URL: %s...\n", attempt+1, session.OrderID, session.IpnURL)
 
 		req, err := http.NewRequest("POST", session.IpnURL, bytes.NewBuffer(jsonData))
 		if err != nil {
-			fmt.Printf("⚠️ [IPN] Create request failed: %v\n", err)
+			fmt.Printf("[IPN] Create request failed: %v\n", err)
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -403,22 +403,22 @@ func (s *Service) TriggerWebhook(sessionID uint) {
 		if err == nil {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				fmt.Printf("✅ [IPN] Gửi Webhook thành công cho OrderID: %s. Phản hồi: 200 OK\n", session.OrderID)
+				fmt.Printf("[IPN] Gửi Webhook thành công cho OrderID: %s. Phản hồi: 200 OK\n", session.OrderID)
 				return
 			}
-			fmt.Printf("⚠️ [IPN] Đối tác phản hồi lỗi HTTP: %d\n", resp.StatusCode)
+			fmt.Printf("[IPN] Đối tác phản hồi lỗi HTTP: %d\n", resp.StatusCode)
 		} else {
-			fmt.Printf("⚠️ [IPN] Kết nối tới IPN URL thất bại: %v\n", err)
+			fmt.Printf("[IPN] Kết nối tới IPN URL thất bại: %v\n", err)
 		}
 
 		if attempt < maxAttempts-1 {
 			wait := backoff[attempt]
-			fmt.Printf("⏳ [IPN] Sẽ thử lại sau %v...\n", wait)
+			fmt.Printf("[IPN] Sẽ thử lại sau %v...\n", wait)
 			time.Sleep(wait)
 		}
 	}
 
-	fmt.Printf("❌ [IPN] Gửi Webhook thất bại hoàn toàn sau %d lần thử cho OrderID: %s\n", maxAttempts, session.OrderID)
+	fmt.Printf("[IPN] Gửi Webhook thất bại hoàn toàn sau %d lần thử cho OrderID: %s\n", maxAttempts, session.OrderID)
 }
 
 // Helpers

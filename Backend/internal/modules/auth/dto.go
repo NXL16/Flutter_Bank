@@ -13,20 +13,14 @@ type LoginRequest struct {
 	TOTPCode string `json:"totp_code"`
 }
 
-type RefreshTokenRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
 type AuthResponse struct {
-	AccessToken         string       `json:"access_token,omitempty"`
-	RefreshToken        string       `json:"-"`
-	User                UserResponse `json:"user,omitempty"`
-	PendingVerification bool         `json:"pending_verification,omitempty"`
-	PendingID           string       `json:"pending_id,omitempty"`
-	DeviceID            string       `json:"device_id,omitempty"`
-	SMSAuthRequired     bool         `json:"sms_auth_required,omitempty"`
-	TOTPRequired        bool         `json:"totp_required,omitempty"`
-	Phone               string       `json:"phone,omitempty"`
+	AccessToken     string       `json:"access_token,omitempty"`
+	RefreshToken    string       `json:"-"`
+	User            UserResponse `json:"user,omitempty"`
+	DeviceID        string       `json:"device_id,omitempty"`
+	SMSAuthRequired bool         `json:"sms_auth_required,omitempty"`
+	TOTPRequired    bool         `json:"totp_required,omitempty"`
+	Phone           string       `json:"phone,omitempty"`
 }
 
 type UserResponse struct {
@@ -40,6 +34,7 @@ type UserResponse struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=8"`
+	IDToken     string `json:"id_token" binding:"required"`
 }
 
 type ResetPasswordRequest struct {

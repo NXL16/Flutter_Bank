@@ -58,28 +58,6 @@ func (r *Repository) FindAccountByIDForUpdate(
 	return &acc, nil
 }
 
-func (r *Repository) FindAccountByNumberForUpdate(
-	tx *gorm.DB,
-	accountNumber string,
-) (*account.Account, error) {
-	var acc account.Account
-
-	err := tx.
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("account_number = ?", accountNumber).
-		First(&acc).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	return &acc, nil
-}
-
 func (r *Repository) UpdateAccountBalance(
 	tx *gorm.DB,
 	accountID uint,
@@ -141,8 +119,12 @@ func (r *Repository) ResolveActivePaymentAccount(
 ) (*AccountResolutionResponse, error) {
 	var result AccountResolutionResponse
 	err := r.db.Table("accounts AS a").
-		Select("a.account_number, u.full_name AS account_name, a.currency").
+		Select(
+			"a.account_number, u.full_name AS account_name, "+
+				"COALESCE(up.avatar_url, '') AS avatar_url, a.currency",
+		).
 		Joins("JOIN users AS u ON u.id = a.user_id").
+		Joins("LEFT JOIN user_profiles AS up ON up.user_id = u.id").
 		Where(
 			"a.account_number = ? AND a.account_type = ? AND a.status = ? AND u.is_locked = ?",
 			accountNumber,
@@ -165,33 +147,6 @@ func (r *Repository) WithTx(fn func(tx *gorm.DB) error) error {
 	return r.db.Transaction(fn)
 }
 
-func (r *Repository) FindPaymentAccountByUserIDForUpdate(
-	tx *gorm.DB,
-	userID uint,
-) (*account.Account, error) {
-
-	var acc account.Account
-
-	err := tx.
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where(
-			"user_id = ? AND account_type = ?",
-			userID,
-			"PAYMENT",
-		).
-		First(&acc).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	return &acc, nil
-}
-
 func (r *Repository) FindPaymentAccountByUserID(
 	userID uint,
 ) (*account.Account, error) {
@@ -211,24 +166,6 @@ func (r *Repository) FindPaymentAccountByUserID(
 	}
 
 	return &acc, nil
-}
-
-func (r *Repository) FindTransactionsByAccountID(
-	accountID uint,
-) ([]Transaction, error) {
-
-	var transactions []Transaction
-
-	err := r.db.
-		Where(
-			"sender_account_id = ? OR receiver_account_id = ?",
-			accountID,
-			accountID,
-		).
-		Order("created_at desc").
-		Find(&transactions).Error
-
-	return transactions, err
 }
 
 func (r *Repository) FindTransactionViewsByAccountID(
@@ -282,27 +219,6 @@ func (r *Repository) transactionViewQuery(accountID uint) *gorm.DB {
 		Joins("JOIN users AS receiver_user ON receiver_user.id = receiver_account.user_id").
 		Joins("LEFT JOIN ledger_entries AS ledger ON ledger.transaction_id = t.id AND ledger.account_id = ?", accountID).
 		Where("t.sender_account_id = ? OR t.receiver_account_id = ?", accountID, accountID)
-}
-
-func (r *Repository) FindTransactionByReferenceCode(
-	referenceCode string,
-) (*Transaction, error) {
-
-	var transaction Transaction
-
-	err := r.db.
-		Where("reference_code = ?", referenceCode).
-		First(&transaction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	return &transaction, nil
 }
 
 func (r *Repository) FindAccountByNumber(
