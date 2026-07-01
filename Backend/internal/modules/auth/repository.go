@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository chịu trách nhiệm thao tác database cho auth
@@ -17,6 +18,14 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{
 		db: db,
 	}
+}
+
+func (r *Repository) withDB(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) WithTx(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(fn)
 }
 
 // CreateUser tạo user mới trong database
@@ -164,4 +173,66 @@ func (r *Repository) CountUserDevices(userID uint) (int64, error) {
 	var count int64
 	err := r.db.Model(&UserDevice{}).Where("user_id = ?", userID).Count(&count).Error
 	return count, err
+}
+
+func (r *Repository) RecordTOTPUsage(
+	userID uint,
+	timeStep int64,
+	purpose string,
+) error {
+	var count int64
+	if err := r.db.Model(&TOTPUsage{}).
+		Where("user_id = ? AND time_step = ?", userID, timeStep).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("TOTP_ALREADY_USED")
+	}
+	return r.db.Create(&TOTPUsage{
+		UserID:   userID,
+		TimeStep: timeStep,
+		Purpose:  purpose,
+	}).Error
+}
+
+func (r *Repository) RecordTOTPFailure(
+	userID uint,
+	now time.Time,
+	maxAttempts int,
+	lockDuration time.Duration,
+) (*time.Time, error) {
+	var lockedUntil *time.Time
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&user, userID).Error; err != nil {
+			return err
+		}
+		if user.TOTPLockedUntil != nil && user.TOTPLockedUntil.After(now) {
+			lockedUntil = user.TOTPLockedUntil
+			return nil
+		}
+		user.TOTPFailedAttempts++
+		user.TOTPLockedUntil = nil
+		if user.TOTPFailedAttempts >= maxAttempts {
+			lock := now.Add(lockDuration)
+			user.TOTPLockedUntil = &lock
+			lockedUntil = &lock
+		}
+		return tx.Model(&user).Updates(map[string]interface{}{
+			"totp_failed_attempts": user.TOTPFailedAttempts,
+			"totp_locked_until":    user.TOTPLockedUntil,
+		}).Error
+	})
+	return lockedUntil, err
+}
+
+func (r *Repository) ResetTOTPFailures(userID uint) error {
+	return r.db.Model(&User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"totp_failed_attempts": 0,
+			"totp_locked_until":    nil,
+		}).Error
 }

@@ -2,7 +2,12 @@ package user
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
 )
 
 type AvatarUploader interface {
@@ -25,6 +30,10 @@ func NewService(repo *Repository, avatarUploader AvatarUploader) *Service {
 		repo:           repo,
 		avatarUploader: avatarUploader,
 	}
+}
+
+func (s *Service) WithTransaction(tx *gorm.DB) *Service {
+	return NewService(s.repo.withDB(tx), s.avatarUploader)
 }
 
 func (s *Service) CreateEmptyProfile(userID uint) error {
@@ -76,6 +85,26 @@ func (s *Service) UpdateMyProfile(
 	userID uint,
 	req UpdateUserProfileRequest,
 ) error {
+	req.Address = strings.TrimSpace(req.Address)
+	req.Gender = strings.ToLower(strings.TrimSpace(req.Gender))
+	if len([]rune(req.Address)) > 500 {
+		return errors.New("Địa chỉ tối đa 500 ký tự")
+	}
+	if req.Gender != "" &&
+		req.Gender != "male" &&
+		req.Gender != "female" &&
+		req.Gender != "other" {
+		return errors.New("Giới tính không hợp lệ")
+	}
+	if req.DateOfBirth != nil {
+		birthDate := *req.DateOfBirth
+		today := time.Now()
+		if birthDate.Before(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)) ||
+			birthDate.After(today) {
+			return errors.New("Ngày sinh không hợp lệ")
+		}
+	}
+
 	profile := &UserProfile{
 		UserID:      userID,
 		Address:     req.Address,

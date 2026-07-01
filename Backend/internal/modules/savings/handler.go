@@ -84,3 +84,40 @@ func (h *Handler) OpenSavings(c *gin.Context) {
 		"data":    res,
 	})
 }
+
+func (h *Handler) WithdrawEarly(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "Không xác định được người dùng đăng nhập",
+		})
+		return
+	}
+	var req EarlyWithdrawalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Số tiền rút hoặc mã PIN giao dịch không hợp lệ",
+		})
+		return
+	}
+	req.IdempotencyKey = c.GetHeader("Idempotency-Key")
+	result, err := h.service.WithdrawEarly(
+		userID,
+		c.Param("accountNumber"),
+		req,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Rút tiết kiệm trước hạn thành công",
+		"data":    result,
+	})
+}

@@ -57,11 +57,15 @@ class EmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.message,
+    this.actionLabel,
+    this.onAction,
   });
 
   final IconData icon;
   final String title;
   final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -79,6 +83,14 @@ class EmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white54),
           ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: onAction,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(actionLabel!),
+            ),
+          ],
         ],
       ),
     ),
@@ -107,6 +119,8 @@ class AsyncPage extends StatelessWidget {
         icon: Icons.cloud_off_rounded,
         title: 'Không tải được dữ liệu',
         message: error!,
+        actionLabel: onRetry == null ? null : 'Thử lại',
+        onAction: onRetry,
       );
     }
     return child;
@@ -114,6 +128,11 @@ class AsyncPage extends StatelessWidget {
 }
 
 OverlayEntry? _activeNotice;
+
+void dismissActiveNotice() {
+  _activeNotice?.remove();
+  _activeNotice = null;
+}
 
 void showMessage(
   BuildContext context,

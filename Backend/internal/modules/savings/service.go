@@ -53,9 +53,10 @@ func (s *Service) GetProducts() []SavingsProductResponse {
 	products := make([]SavingsProductResponse, 0, len(terms))
 	for _, term := range terms {
 		products = append(products, SavingsProductResponse{
-			TermMonths:    term,
-			InterestRate:  savingsProducts[term],
-			MinimumAmount: minimumSavingsAmount,
+			TermMonths:         term,
+			InterestRate:       savingsProducts[term],
+			MinimumAmount:      minimumSavingsAmount,
+			DemandInterestRate: demandInterestRate,
 		})
 	}
 	return products
@@ -66,9 +67,45 @@ func (s *Service) GetUserSavings(userID uint) ([]SavingsResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	accountIDs := make([]uint, 0, len(details))
+	for _, detail := range details {
+		accountIDs = append(accountIDs, detail.AccountID)
+	}
+	events, err := s.repo.FindMaturityEventsByAccountIDs(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	withdrawals, err := s.repo.FindWithdrawalsByAccountIDs(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	eventsByAccount := make(map[uint][]SavingsMaturityEvent, len(details))
+	for _, event := range events {
+		eventsByAccount[event.AccountID] = append(
+			eventsByAccount[event.AccountID],
+			event,
+		)
+	}
+	withdrawalsByAccount := make(
+		map[uint][]SavingsWithdrawal,
+		len(details),
+	)
+	for _, withdrawal := range withdrawals {
+		withdrawalsByAccount[withdrawal.AccountID] = append(
+			withdrawalsByAccount[withdrawal.AccountID],
+			withdrawal,
+		)
+	}
 	response := make([]SavingsResponse, 0, len(details))
 	for _, detail := range details {
-		response = append(response, mapSavingsResponse(detail))
+		response = append(
+			response,
+			mapSavingsResponseWithHistory(
+				detail,
+				eventsByAccount[detail.AccountID],
+				withdrawalsByAccount[detail.AccountID],
+			),
+		)
 	}
 	return response, nil
 }
@@ -238,12 +275,72 @@ func (s *Service) OpenSavings(userID uint, req CreateSavingsRequest) (*SavingsRe
 	return &response, nil
 }
 
-func mapSavingsResponse(detail SavingsDetail) SavingsResponse {
-	expectedInterest := int64(math.Round(
-		float64(detail.OriginalPrincipal) *
-			detail.InterestRate / 100 *
-			float64(detail.TermMonths) / 12,
+func calculateTermInterest(principal int64, interestRate float64, termMonths int) int64 {
+	return int64(math.Round(
+		float64(principal) *
+			interestRate / 100 *
+			float64(termMonths) / 12,
 	))
+}
+
+func mapSavingsResponse(
+	detail SavingsDetail,
+	events ...[]SavingsMaturityEvent,
+) SavingsResponse {
+	var maturityHistory []SavingsMaturityEvent
+	if len(events) > 0 {
+		maturityHistory = events[0]
+	}
+	return mapSavingsResponseWithHistory(detail, maturityHistory, nil)
+}
+
+func mapSavingsResponseWithHistory(
+	detail SavingsDetail,
+	events []SavingsMaturityEvent,
+	withdrawals []SavingsWithdrawal,
+) SavingsResponse {
+	expectedInterest := calculateTermInterest(
+		detail.OriginalPrincipal,
+		detail.InterestRate,
+		detail.TermMonths,
+	)
+	history := make([]SavingsMaturityEventResponse, 0)
+	if len(events) > 0 {
+		history = make([]SavingsMaturityEventResponse, 0, len(events))
+		for _, event := range events {
+			history = append(history, SavingsMaturityEventResponse{
+				CycleNumber:  event.CycleNumber,
+				Principal:    event.Principal,
+				Interest:     event.Interest,
+				InterestRate: event.InterestRate,
+				TermMonths:   event.TermMonths,
+				PeriodStart:  event.PeriodStart,
+				PeriodEnd:    event.PeriodEnd,
+				Instruction:  event.Instruction,
+				Outcome:      event.Outcome,
+				ProcessedAt:  event.ProcessedAt,
+			})
+		}
+	}
+	withdrawalHistory := make(
+		[]SavingsWithdrawalResponse,
+		0,
+		len(withdrawals),
+	)
+	for _, withdrawal := range withdrawals {
+		withdrawalHistory = append(
+			withdrawalHistory,
+			SavingsWithdrawalResponse{
+				Amount:             withdrawal.Amount,
+				DemandInterestRate: withdrawal.DemandInterestRate,
+				AccruedDays:        withdrawal.AccruedDays,
+				Interest:           withdrawal.Interest,
+				RemainingPrincipal: withdrawal.RemainingPrincipal,
+				IsFullWithdrawal:   withdrawal.IsFullWithdrawal,
+				ProcessedAt:        withdrawal.ProcessedAt,
+			},
+		)
+	}
 	return SavingsResponse{
 		AccountNumber:       detail.Account.AccountNumber,
 		OriginalPrincipal:   detail.OriginalPrincipal,
@@ -256,6 +353,13 @@ func mapSavingsResponse(detail SavingsDetail) SavingsResponse {
 		MaturityInstruction: detail.MaturityInstruction,
 		IsSettled:           detail.IsSettled,
 		Status:              detail.Account.Status,
+		RenewalCount:        detail.RenewalCount,
+		LastMaturedAt:       detail.LastMaturedAt,
+		MaturityHistory:     history,
+		ClosedAt:            detail.ClosedAt,
+		ClosureReason:       detail.ClosureReason,
+		WithdrawalHistory:   withdrawalHistory,
+		DemandInterestRate:  demandInterestRate,
 	}
 }
 

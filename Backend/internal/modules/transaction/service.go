@@ -361,16 +361,55 @@ func (s *Service) GetTransactionDetail(
 }
 
 func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionResponse, error) {
-	// 1. Tìm tài khoản nguồn (PAYMENT) của Admin
-	adminPaymentAccount, err := s.repo.FindPaymentAccountByUserID(adminUserID)
+	req.ReceiverAccountNumber = strings.TrimSpace(req.ReceiverAccountNumber)
+	req.Description = strings.TrimSpace(req.Description)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if !regexp.MustCompile(`^[A-Za-z0-9._:-]{16,64}$`).MatchString(req.IdempotencyKey) {
+		return nil, errors.New("Thiếu hoặc sai định dạng Idempotency-Key")
+	}
+	if !regexp.MustCompile(`^[0-9]{12}$`).MatchString(req.ReceiverAccountNumber) {
+		return nil, errors.New("Số tài khoản nhận phải gồm 12 chữ số")
+	}
+	if req.Amount < s.cfg.TransferMinAmount {
+		return nil, fmt.Errorf(
+			"Số tiền nạp tối thiểu là %d VND",
+			s.cfg.TransferMinAmount,
+		)
+	}
+	if req.Amount > s.cfg.AdminDepositMaxAmount {
+		return nil, fmt.Errorf(
+			"Số tiền nạp vượt hạn mức mỗi giao dịch %d VND",
+			s.cfg.AdminDepositMaxAmount,
+		)
+	}
+	if len([]rune(req.Description)) > 140 {
+		return nil, errors.New("Nội dung nạp tiền tối đa 140 ký tự")
+	}
+	existing, err := s.repo.FindTransactionByIdempotencyKey(
+		adminUserID,
+		req.IdempotencyKey,
+	)
 	if err != nil {
 		return nil, err
 	}
-	if adminPaymentAccount == nil {
-		return nil, errors.New("Không tìm thấy tài khoản nguồn PAYMENT của admin (vui lòng liên hệ hỗ trợ)")
+	if existing != nil {
+		return mapTransactionResponse(existing), nil
 	}
 
-	// 2. Tìm tài khoản nhận (PAYMENT) của User bằng số tài khoản
+	// Admin chỉ là người khởi tạo/phê duyệt nghiệp vụ. Nguồn hạch toán luôn
+	// là tài khoản đối ứng hệ thống, tuyệt đối không dùng tài khoản cá nhân
+	// của Admin dù dữ liệu cũ có tồn tại tài khoản PAYMENT.
+	fundingAccount, err := s.repo.FindAccountByNumber(
+		systemOperationsAccountNumber,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if fundingAccount == nil ||
+		fundingAccount.AccountType != "SYSTEM_FUNDING" {
+		return nil, errors.New("Nguồn cấp tiền hệ thống chưa sẵn sàng")
+	}
+
 	receiverAccount, err := s.repo.FindAccountByNumber(req.ReceiverAccountNumber)
 	if err != nil {
 		return nil, err
@@ -378,12 +417,17 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 	if receiverAccount == nil {
 		return nil, errors.New("Không tìm thấy số tài khoản người nhận")
 	}
-
-	if adminPaymentAccount.ID == receiverAccount.ID {
-		return nil, errors.New("Không thể tự nạp tiền cho chính tài khoản Admin của mình")
+	if receiverAccount.AccountType != "PAYMENT" {
+		return nil, errors.New("Chỉ có thể nạp vào tài khoản thanh toán")
+	}
+	receiverRole, err := s.repo.GetUserRole(receiverAccount.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if receiverRole != "user" {
+		return nil, errors.New("Chỉ có thể nạp tiền cho tài khoản khách hàng")
 	}
 
-	// 3. Tìm thông tin tên Admin để ghi nhận lịch sử kiểm toán (audit log)
 	var adminUser struct {
 		FullName string
 	}
@@ -393,12 +437,13 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 	}
 
 	var transactionResult *Transaction
+	var receiverPushMessage string
 
 	err = s.repo.WithTx(func(tx *gorm.DB) error {
 		// Khóa 2 tài khoản theo thứ tự ID để chống deadlock
 		var lockedAdmin, lockedReceiver *account.Account
-		if adminPaymentAccount.ID < receiverAccount.ID {
-			lockedAdmin, err = s.repo.FindAccountByIDForUpdate(tx, adminPaymentAccount.ID)
+		if fundingAccount.ID < receiverAccount.ID {
+			lockedAdmin, err = s.repo.FindAccountByIDForUpdate(tx, fundingAccount.ID)
 			if err != nil {
 				return err
 			}
@@ -411,7 +456,7 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 			if err != nil {
 				return err
 			}
-			lockedAdmin, err = s.repo.FindAccountByIDForUpdate(tx, adminPaymentAccount.ID)
+			lockedAdmin, err = s.repo.FindAccountByIDForUpdate(tx, fundingAccount.ID)
 			if err != nil {
 				return err
 			}
@@ -419,6 +464,9 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 
 		if lockedAdmin == nil || lockedReceiver == nil {
 			return errors.New("Không tìm thấy thông tin tài khoản")
+		}
+		if lockedAdmin.Status != "ACTIVE" {
+			return errors.New("Tài khoản nguồn hoặc nguồn cấp tiền hệ thống không hoạt động")
 		}
 
 		if lockedReceiver.Status != "ACTIVE" {
@@ -429,7 +477,8 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 			return errors.New("Không thể chuyển tiền khác loại tiền tệ")
 		}
 
-		// Nạp tiền: Ví Admin giảm (cho phép âm), ví User tăng
+		// Tài khoản funding là tài khoản đối ứng hệ thống, không phải ví cá nhân
+		// của Admin. Số dư âm thể hiện nghĩa vụ cấp vốn của ngân hàng.
 		adminNewBalance := lockedAdmin.Balance - req.Amount
 		receiverNewBalance := lockedReceiver.Balance + req.Amount
 
@@ -449,6 +498,8 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 
 		newTransaction := &Transaction{
 			ReferenceCode:     generateReferenceCode(),
+			InitiatorUserID:   &adminUserID,
+			IdempotencyKey:    &req.IdempotencyKey,
 			SenderAccountID:   &lockedAdmin.ID,
 			ReceiverAccountID: lockedReceiver.ID,
 			Amount:            req.Amount,
@@ -481,24 +532,32 @@ func (s *Service) Deposit(adminUserID uint, req DepositRequest) (*TransactionRes
 		}
 
 		transactionResult = newTransaction
+		receiverPushMessage = receiverMsg
 		return nil
 	})
 
 	if err != nil {
+		existing, findErr := s.repo.FindTransactionByIdempotencyKey(
+			adminUserID,
+			req.IdempotencyKey,
+		)
+		if findErr == nil && existing != nil {
+			return mapTransactionResponse(existing), nil
+		}
 		return nil, err
 	}
 
-	return &TransactionResponse{
-		ID:                transactionResult.ID,
-		ReferenceCode:     transactionResult.ReferenceCode,
-		SenderAccountID:   transactionResult.SenderAccountID,
-		ReceiverAccountID: transactionResult.ReceiverAccountID,
-		Amount:            transactionResult.Amount,
-		Currency:          transactionResult.Currency,
-		Type:              transactionResult.Type,
-		Status:            transactionResult.Status,
-		Description:       transactionResult.Description,
-	}, nil
+	_ = s.notiService.SendPushToUser(
+		receiverAccount.UserID,
+		"Biến động số dư (+)",
+		receiverPushMessage,
+		map[string]string{
+			"type":           "BALANCE_FLUCTUATION",
+			"reference_code": transactionResult.ReferenceCode,
+			"transaction":    "DEPOSIT",
+		},
+	)
+	return mapTransactionResponse(transactionResult), nil
 }
 
 func (s *Service) GetTransactionsByAccountID(accountID uint) ([]TransactionResponse, error) {

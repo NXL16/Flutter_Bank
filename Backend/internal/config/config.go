@@ -29,11 +29,14 @@ type Config struct {
 	CloudinaryAPIKey    string
 	CloudinaryAPISecret string
 
-	EnableDevSeed       bool
-	AllowTestPaymentOTP bool
-	TransferMinAmount   int64
-	TransferMaxAmount   int64
-	DailyTransferLimit  int64
+	EnableDevSeed         bool
+	AllowTestPaymentOTP   bool
+	TransferMinAmount     int64
+	TransferMaxAmount     int64
+	DailyTransferLimit    int64
+	AdminDepositMaxAmount int64
+
+	SavingsMaturityIntervalSeconds int64
 }
 
 // LoadConfig đọc file .env và nạp vào Config
@@ -66,6 +69,15 @@ func LoadConfig() *Config {
 		TransferMinAmount:   getEnvInt64("TRANSFER_MIN_AMOUNT", 10000),
 		TransferMaxAmount:   getEnvInt64("TRANSFER_MAX_AMOUNT", 500000000),
 		DailyTransferLimit:  getEnvInt64("DAILY_TRANSFER_LIMIT", 1000000000),
+		AdminDepositMaxAmount: getEnvInt64(
+			"ADMIN_DEPOSIT_MAX_AMOUNT",
+			5000000000,
+		),
+
+		SavingsMaturityIntervalSeconds: getEnvInt64(
+			"SAVINGS_MATURITY_INTERVAL_SECONDS",
+			60,
+		),
 	}
 
 	if cfg.ServerMode == "production" {
@@ -80,6 +92,12 @@ func LoadConfig() *Config {
 		cfg.TransferMaxAmount < cfg.TransferMinAmount ||
 		cfg.DailyTransferLimit < cfg.TransferMaxAmount {
 		log.Fatal("❌ Cấu hình hạn mức chuyển tiền không hợp lệ")
+	}
+	if cfg.AdminDepositMaxAmount < cfg.TransferMinAmount {
+		log.Fatal("❌ ADMIN_DEPOSIT_MAX_AMOUNT không hợp lệ")
+	}
+	if cfg.SavingsMaturityIntervalSeconds <= 0 {
+		log.Fatal("❌ SAVINGS_MATURITY_INTERVAL_SECONDS phải lớn hơn 0")
 	}
 	cloudinaryValues := []string{
 		cfg.CloudinaryCloudName,

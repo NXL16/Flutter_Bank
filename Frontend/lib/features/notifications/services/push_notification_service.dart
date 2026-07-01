@@ -33,6 +33,15 @@ class PushNotificationService {
   String? _token;
   bool _initialized = false;
 
+  String get _platform => switch (defaultTargetPlatform) {
+    TargetPlatform.android => 'android',
+    TargetPlatform.iOS => 'ios',
+    TargetPlatform.macOS => 'macos',
+    TargetPlatform.windows => 'windows',
+    TargetPlatform.linux => 'linux',
+    TargetPlatform.fuchsia => 'fuchsia',
+  };
+
   Future<void> initialize({
     ForegroundNotification? onForegroundNotification,
   }) async {
@@ -90,7 +99,7 @@ class PushNotificationService {
         await ApiService.delete(
           '${ApiUrl.notifications}/devices',
           auth: true,
-          body: {'token': token, 'platform': 'android'},
+          body: {'token': token, 'platform': _platform},
         );
       } catch (_) {
         // Logout không được mắc kẹt chỉ vì endpoint push tạm thời lỗi.
@@ -105,7 +114,7 @@ class PushNotificationService {
   Future<void> _register(String token) => ApiService.post(
     '${ApiUrl.notifications}/devices',
     auth: true,
-    body: {'token': token, 'platform': 'android'},
+    body: {'token': token, 'platform': _platform},
   );
 
   Future<void> _initializeLocalNotifications() async {

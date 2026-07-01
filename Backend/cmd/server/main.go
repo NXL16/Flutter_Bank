@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"bank-service/internal/config"
 	"bank-service/internal/database"
@@ -46,14 +48,19 @@ func main() {
 		&auth.User{},
 		&auth.RefreshToken{},
 		&auth.UserDevice{},
+		&auth.TOTPUsage{},
+		&admin.AuditLog{},
+		&admin.StepUpChallenge{},
 		&notification.Notification{},
 		&notification.PushToken{},
 		&account.Account{},
-		&savings.SavingsDetail{},
 		&user.UserProfile{},
 		&transaction.Transaction{},
 		&transaction.LedgerEntry{},
 		&transaction.TransactionPIN{},
+		&savings.SavingsDetail{},
+		&savings.SavingsMaturityEvent{},
+		&savings.SavingsWithdrawal{},
 		&payment.Merchant{},
 		&payment.PaymentSession{},
 	); err != nil {
@@ -133,10 +140,18 @@ func main() {
 
 	transactionRepo := transaction.NewRepository(database.DB)
 	transactionService := transaction.NewService(transactionRepo, notificationService, cfg)
+	if err := transactionService.EnsureOperationsInfrastructure(); err != nil {
+		log.Fatalf("Khởi tạo hạ tầng vận hành thất bại: %v", err)
+	}
 	transactionHandler := transaction.NewHandler(transactionService)
 
 	adminRepo := admin.NewRepository(database.DB)
-	adminService := admin.NewService(adminRepo, accountService, transactionService)
+	adminService := admin.NewService(
+		adminRepo,
+		accountService,
+		transactionService,
+		notificationService,
+	)
 	adminHandler := admin.NewHandler(adminService)
 
 	// Khởi tạo payment module
@@ -147,6 +162,13 @@ func main() {
 	// Khởi tạo savings module
 	savingsRepo := savings.NewRepository(database.DB)
 	savingsService := savings.NewService(savingsRepo, notificationService, transactionService)
+	if err := savingsService.EnsureSystemInfrastructure(); err != nil {
+		log.Fatalf("Khởi tạo hạ tầng chi lãi tiết kiệm thất bại: %v", err)
+	}
+	savingsService.StartMaturityWorker(
+		context.Background(),
+		time.Duration(cfg.SavingsMaturityIntervalSeconds)*time.Second,
+	)
 	savingsHandler := savings.NewHandler(savingsService)
 
 	api := r.Group("/api/v1")
@@ -187,7 +209,10 @@ func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", allowedOrigin)
 			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			c.Header(
+				"Access-Control-Allow-Headers",
+				"Authorization, Content-Type, Idempotency-Key",
+			)
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		}
 

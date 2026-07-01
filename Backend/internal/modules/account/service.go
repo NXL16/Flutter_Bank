@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+
+	"gorm.io/gorm"
 )
 
 type Service struct {
@@ -14,6 +16,10 @@ func NewService(repo *Repository) *Service {
 	return &Service{
 		repo: repo,
 	}
+}
+
+func (s *Service) WithTransaction(tx *gorm.DB) *Service {
+	return NewService(s.repo.withDB(tx))
 }
 
 // GetUserAccounts lấy danh sách account của user

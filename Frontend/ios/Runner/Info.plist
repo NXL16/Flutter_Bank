@@ -28,6 +28,10 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NF Bank cần kết nối Backend đang chạy trong mạng nội bộ khi phát triển.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NF Bank cần quyền lưu ảnh biên lai giao dịch vào thư viện ảnh.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NF Bank cần quyền truy cập thư viện ảnh để lưu biên lai giao dịch.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

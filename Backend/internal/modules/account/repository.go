@@ -16,6 +16,10 @@ func NewRepository(db *gorm.DB) *Repository {
 	}
 }
 
+func (r *Repository) withDB(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
 func (r *Repository) CreateAccount(account *Account) error {
 	return r.db.Create(account).Error
 }

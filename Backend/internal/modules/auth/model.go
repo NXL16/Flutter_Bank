@@ -8,20 +8,22 @@ import (
 )
 
 type User struct {
-	ID             uint                        `gorm:"primaryKey" json:"id"`
-	FullName       string                      `gorm:"type:varchar(255);not null" json:"full_name"`
-	PasswordHash   string                      `gorm:"type:varchar(255);not null" json:"-"`
-	Phone          string                      `gorm:"type:varchar(20);uniqueIndex;not null" json:"phone"`
-	Role           string                      `gorm:"type:varchar(50);default:user" json:"role"`
-	IsVerified     bool                        `gorm:"default:false" json:"is_verified"`
-	IsLocked       bool                        `gorm:"default:false" json:"is_locked"`
-	TOTPSecret     string                      `gorm:"type:varchar(255)" json:"-"`
-	SessionVersion int                         `gorm:"not null;default:1" json:"-"`
-	Accounts       []account.Account           `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"accounts,omitempty"`
-	Profile        user.UserProfile            `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"profile,omitempty"`
-	Notifications  []notification.Notification `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"notifications,omitempty"`
-	CreatedAt      time.Time                   `json:"created_at"`
-	UpdatedAt      time.Time                   `json:"updated_at"`
+	ID                 uint                        `gorm:"primaryKey" json:"id"`
+	FullName           string                      `gorm:"type:varchar(255);not null" json:"full_name"`
+	PasswordHash       string                      `gorm:"type:varchar(255);not null" json:"-"`
+	Phone              string                      `gorm:"type:varchar(20);uniqueIndex;not null" json:"phone"`
+	Role               string                      `gorm:"type:varchar(50);default:user" json:"role"`
+	IsVerified         bool                        `gorm:"default:false" json:"is_verified"`
+	IsLocked           bool                        `gorm:"default:false" json:"is_locked"`
+	TOTPSecret         string                      `gorm:"type:varchar(255)" json:"-"`
+	TOTPFailedAttempts int                         `gorm:"not null;default:0" json:"-"`
+	TOTPLockedUntil    *time.Time                  `gorm:"index" json:"-"`
+	SessionVersion     int                         `gorm:"not null;default:1" json:"-"`
+	Accounts           []account.Account           `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"accounts,omitempty"`
+	Profile            user.UserProfile            `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"profile,omitempty"`
+	Notifications      []notification.Notification `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"notifications,omitempty"`
+	CreatedAt          time.Time                   `json:"created_at"`
+	UpdatedAt          time.Time                   `json:"updated_at"`
 }
 
 type RefreshToken struct {
@@ -45,4 +47,14 @@ type UserDevice struct {
 	LastLoggedInAt time.Time `gorm:"not null" json:"last_logged_in_at"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// TOTPUsage bảo đảm một mã theo time-step chỉ được chấp nhận một lần,
+// kể cả khi mã vừa dùng để đăng nhập rồi được thử lại cho step-up.
+type TOTPUsage struct {
+	ID        uint      `gorm:"primaryKey" json:"-"`
+	UserID    uint      `gorm:"not null;uniqueIndex:idx_totp_once" json:"-"`
+	TimeStep  int64     `gorm:"not null;uniqueIndex:idx_totp_once" json:"-"`
+	Purpose   string    `gorm:"type:varchar(50);not null" json:"-"`
+	CreatedAt time.Time `gorm:"index" json:"-"`
 }

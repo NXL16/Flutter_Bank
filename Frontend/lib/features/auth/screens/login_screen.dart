@@ -90,99 +90,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _showResetPassword() async {
-    final phone = TextEditingController(text: _phone.text);
-    final password = TextEditingController();
-    final otp = TextEditingController();
-    String? verificationId;
-    bool busy = false;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Đặt lại mật khẩu'),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: phone,
-                  keyboardType: TextInputType.phone,
-                  enabled: verificationId == null,
-                  decoration: fieldDecoration('Số điện thoại'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: password,
-                  obscureText: true,
-                  decoration: fieldDecoration('Mật khẩu mới'),
-                ),
-                if (verificationId != null) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: otp,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    decoration: fieldDecoration('Mã OTP SMS'),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(context),
-              child: const Text('Đóng'),
-            ),
-            FilledButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      setDialogState(() => busy = true);
-                      try {
-                        verificationId ??= await _phoneAuth.sendCode(
-                          phone.text,
-                        );
-                        if (verificationId!.startsWith('AUTO:') ||
-                            otp.text.length == 6) {
-                          final token = await _phoneAuth.verifyCode(
-                            verificationId!,
-                            otp.text,
-                          );
-                          await _auth.resetPassword(
-                            phone.text,
-                            token,
-                            password.text,
-                          );
-                          if (context.mounted) Navigator.pop(context);
-                          if (mounted) {
-                            showMessage(
-                              this.context,
-                              'Đặt lại mật khẩu thành công',
-                            );
-                          }
-                        }
-                      } on ApiException catch (error) {
-                        if (context.mounted) {
-                          showMessage(context, error.message, error: true);
-                        }
-                      } finally {
-                        if (context.mounted) {
-                          setDialogState(() => busy = false);
-                        }
-                      }
-                    },
-              child: Text(
-                verificationId == null ? 'Gửi mã SMS' : 'Đổi mật khẩu',
-              ),
-            ),
-          ],
-        ),
+      builder: (dialogContext) => _ResetPasswordDialog(
+        initialPhone: _phone.text,
+        phoneAuth: _phoneAuth,
+        auth: _auth,
       ),
     );
-    phone.dispose();
-    password.dispose();
-    otp.dispose();
   }
 
   @override
@@ -340,3 +255,154 @@ class _LoginScreenState extends State<LoginScreen> {
         : 'Số điện thoại Việt Nam không hợp lệ';
   }
 }
+
+class _ResetPasswordDialog extends StatefulWidget {
+  const _ResetPasswordDialog({
+    required this.initialPhone,
+    required this.phoneAuth,
+    required this.auth,
+  });
+
+  final String initialPhone;
+  final PhoneAuthService phoneAuth;
+  final AuthService auth;
+
+  @override
+  State<_ResetPasswordDialog> createState() => _ResetPasswordDialogState();
+}
+
+class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
+  late final TextEditingController phone;
+  final password = TextEditingController();
+  final otp = TextEditingController();
+  String? verificationId;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    phone = TextEditingController(text: widget.initialPhone);
+  }
+
+  @override
+  void dispose() {
+    phone.dispose();
+    password.dispose();
+    otp.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Đặt lại mật khẩu'),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                enabled: verificationId == null,
+                decoration: fieldDecoration('Số điện thoại'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: password,
+                obscureText: true,
+                decoration: fieldDecoration('Mật khẩu mới'),
+              ),
+              if (verificationId != null) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: otp,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  decoration: fieldDecoration('Mã OTP SMS'),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: busy ? null : () => Navigator.pop(context),
+            child: const Text('Đóng'),
+          ),
+          FilledButton(
+            onPressed: busy
+                ? null
+                : () async {
+                    final digits = phone.text.replaceAll(RegExp(r'\D'), '');
+                    if (!RegExp(
+                      r'^(0|84)?(3|5|7|8|9)\d{8}$',
+                    ).hasMatch(digits)) {
+                      showMessage(
+                        context,
+                        'Số điện thoại Việt Nam không hợp lệ',
+                        error: true,
+                      );
+                      return;
+                    }
+                    if (!RegExp(
+                      r'^(?=.*[A-Z])(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$',
+                    ).hasMatch(password.text)) {
+                      showMessage(
+                        context,
+                        'Mật khẩu mới cần ít nhất 8 ký tự, có chữ hoa và ký tự đặc biệt',
+                        error: true,
+                      );
+                      return;
+                    }
+                    if (verificationId != null &&
+                        !verificationId!.startsWith('AUTO:') &&
+                        !RegExp(r'^\d{6}$').hasMatch(otp.text.trim())) {
+                      showMessage(
+                        context,
+                        'Mã OTP phải gồm đúng 6 số',
+                        error: true,
+                      );
+                      return;
+                    }
+                    setState(() => busy = true);
+                    try {
+                      verificationId ??= await widget.phoneAuth.sendCode(
+                        phone.text,
+                      );
+                      if (verificationId!.startsWith('AUTO:') ||
+                          otp.text.length == 6) {
+                        final token = await widget.phoneAuth.verifyCode(
+                          verificationId!,
+                          otp.text,
+                        );
+                        await widget.auth.resetPassword(
+                          phone.text,
+                          token,
+                          password.text,
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          showMessage(
+                            context,
+                            'Đặt lại mật khẩu thành công',
+                          );
+                        }
+                      }
+                    } on ApiException catch (error) {
+                      if (context.mounted) {
+                        showMessage(context, error.message, error: true);
+                      }
+                    } finally {
+                      if (mounted) {
+                        setState(() => busy = false);
+                      }
+                    }
+                  },
+            child: Text(
+              verificationId == null ? 'Gửi mã SMS' : 'Đổi mật khẩu',
+            ),
+          ),
+        ],
+      );
+}
+

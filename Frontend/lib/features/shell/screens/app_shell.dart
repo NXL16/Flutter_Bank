@@ -4,7 +4,7 @@ import '../../../core/services/bank_repository.dart';
 import '../../../core/storage/token_storage.dart';
 import '../../auth/screens/login_screen.dart';
 import '../../auth/services/auth_service.dart';
-import '../../banking/screens/user_pages.dart' hide TransferPage;
+import '../../banking/screens/user_pages.dart';
 import '../../notifications/services/push_notification_service.dart';
 import '../../transfers/screens/transfer_page.dart';
 

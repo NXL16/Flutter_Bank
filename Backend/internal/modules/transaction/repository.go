@@ -196,6 +196,9 @@ func (r *Repository) FindTransactionViewByReferenceCode(
 }
 
 func (r *Repository) transactionViewQuery(accountID uint) *gorm.DB {
+	var ownerUserID uint
+	_ = r.db.Table("accounts").Select("user_id").Where("id = ?", accountID).Row().Scan(&ownerUserID)
+
 	return r.db.Table("transactions AS t").
 		Select(`
 			t.id,
@@ -208,17 +211,26 @@ func (r *Repository) transactionViewQuery(accountID uint) *gorm.DB {
 			t.status,
 			t.description,
 			t.created_at,
-			CASE WHEN t.sender_account_id = ? THEN 'OUT' ELSE 'IN' END AS direction,
-			CASE WHEN t.sender_account_id = ? THEN receiver_user.full_name ELSE sender_user.full_name END AS counterparty_name,
-			CASE WHEN t.sender_account_id = ? THEN receiver_account.account_number ELSE sender_account.account_number END AS counterparty_account_number,
+			CASE 
+				WHEN t.sender_account_id = ? OR (t.initiator_user_id = ? AND t.type = 'DEPOSIT') THEN 'OUT' 
+				ELSE 'IN' 
+			END AS direction,
+			CASE 
+				WHEN t.sender_account_id = ? OR (t.initiator_user_id = ? AND t.type = 'DEPOSIT') THEN receiver_user.full_name 
+				ELSE sender_user.full_name 
+			END AS counterparty_name,
+			CASE 
+				WHEN t.sender_account_id = ? OR (t.initiator_user_id = ? AND t.type = 'DEPOSIT') THEN receiver_account.account_number 
+				ELSE sender_account.account_number 
+			END AS counterparty_account_number,
 			ledger.balance_after AS balance_after
-		`, accountID, accountID, accountID).
+		`, accountID, ownerUserID, accountID, ownerUserID, accountID, ownerUserID).
 		Joins("LEFT JOIN accounts AS sender_account ON sender_account.id = t.sender_account_id").
 		Joins("JOIN accounts AS receiver_account ON receiver_account.id = t.receiver_account_id").
 		Joins("LEFT JOIN users AS sender_user ON sender_user.id = sender_account.user_id").
 		Joins("JOIN users AS receiver_user ON receiver_user.id = receiver_account.user_id").
 		Joins("LEFT JOIN ledger_entries AS ledger ON ledger.transaction_id = t.id AND ledger.account_id = ?", accountID).
-		Where("t.sender_account_id = ? OR t.receiver_account_id = ?", accountID, accountID)
+		Where("t.sender_account_id = ? OR t.receiver_account_id = ? OR (t.initiator_user_id = ? AND t.type = 'DEPOSIT')", accountID, accountID, ownerUserID)
 }
 
 func (r *Repository) FindAccountByNumber(
@@ -248,4 +260,13 @@ func (r *Repository) GetUserFullName(userID uint) (string, error) {
 	}
 	err := r.db.Table("users").Where("id = ?", userID).First(&user).Error
 	return user.FullName, err
+}
+
+func (r *Repository) GetUserRole(userID uint) (string, error) {
+	var role string
+	err := r.db.Table("users").
+		Select("role").
+		Where("id = ?", userID).
+		Scan(&role).Error
+	return role, err
 }

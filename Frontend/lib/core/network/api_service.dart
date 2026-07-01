@@ -36,6 +36,9 @@ class ApiService {
   ApiService._();
 
   static final http.Client _client = createHttpClient();
+  static Future<bool>? _refreshInFlight;
+  static Future<void>? _sessionExpirationInFlight;
+  static Future<void> Function()? onSessionExpired;
 
   static Future<ApiResult> get(String url, {bool auth = false}) =>
       _request('GET', url, auth: auth);
@@ -57,7 +60,8 @@ class ApiService {
     String url, {
     Map<String, dynamic>? body,
     bool auth = true,
-  }) => _request('PATCH', url, body: body, auth: auth);
+    Map<String, String>? headers,
+  }) => _request('PATCH', url, body: body, auth: auth, extraHeaders: headers);
 
   static Future<ApiResult> delete(
     String url, {
@@ -97,6 +101,9 @@ class ApiService {
         auth: auth,
         retry: false,
       );
+    }
+    if (response.statusCode == 401 && auth) {
+      await _expireSession();
     }
 
     dynamic decoded;
@@ -146,10 +153,7 @@ class ApiService {
     try {
       response = await http.Response.fromStream(await _client.send(request));
     } catch (_) {
-      throw ApiException(
-        'Không thể kết nối ${ApiUrl.baseUrl}. '
-        'Nếu dùng điện thoại thật, hãy nhập IP LAN của máy chạy Backend.',
-      );
+      throw ApiException('Máy chủ chưa sẵn sàng. Vui lòng thử lại');
     }
 
     if (response.statusCode == 401 && auth && retry) {
@@ -164,6 +168,9 @@ class ApiService {
           extraHeaders: extraHeaders,
         );
       }
+    }
+    if (response.statusCode == 401 && auth) {
+      await _expireSession();
     }
 
     dynamic decoded;
@@ -191,7 +198,17 @@ class ApiService {
     return result;
   }
 
-  static Future<bool> _tryRefresh() async {
+  static Future<bool> _tryRefresh() {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+    final refresh = _performRefresh();
+    _refreshInFlight = refresh;
+    return refresh.whenComplete(() {
+      if (identical(_refreshInFlight, refresh)) _refreshInFlight = null;
+    });
+  }
+
+  static Future<bool> _performRefresh() async {
     try {
       final request = http.Request('POST', Uri.parse(ApiUrl.refresh))
         ..headers['Content-Type'] = 'application/json';
@@ -211,13 +228,18 @@ class ApiService {
     }
   }
 
-  // Compatibility helpers for older callers while screens are migrated.
-  static Future<http.Response> postLegacy(
-    String url,
-    Map<String, dynamic> body,
-  ) => http.post(
-    Uri.parse(url),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode(body),
-  );
+  static Future<void> _expireSession() {
+    final inFlight = _sessionExpirationInFlight;
+    if (inFlight != null) return inFlight;
+    final expiration = () async {
+      await TokenStorage.clearAuth();
+      await onSessionExpired?.call();
+    }();
+    _sessionExpirationInFlight = expiration;
+    return expiration.whenComplete(() {
+      if (identical(_sessionExpirationInFlight, expiration)) {
+        _sessionExpirationInFlight = null;
+      }
+    });
+  }
 }

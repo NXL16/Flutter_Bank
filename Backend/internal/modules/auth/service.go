@@ -20,6 +20,7 @@ import (
 	"bank-service/internal/modules/user"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // Service cung cấp các phương thức xử lý logic liên quan đến xác thực và quản lý người dùng
@@ -50,6 +51,10 @@ func NewService(
 
 // Register xử lý đăng ký tài khoản
 func (s *Service) Register(req RegisterRequest) error {
+	req.FullName = strings.TrimSpace(req.FullName)
+	if len([]rune(req.FullName)) < 2 || len([]rune(req.FullName)) > 100 {
+		return errors.New("Họ và tên phải có từ 2 đến 100 ký tự")
+	}
 	if err := validatePassword(req.Password); err != nil {
 		return err
 	}
@@ -102,13 +107,19 @@ func (s *Service) Register(req RegisterRequest) error {
 		IsVerified:   true,
 		IsLocked:     false,
 	}
-	if err := s.repo.CreateUser(user); err != nil {
-		return err
-	}
-	if err := s.accountService.CreateDefaultPaymentAccount(user.ID); err != nil {
-		return err
-	}
-	return s.userService.CreateEmptyProfile(user.ID)
+	return s.repo.WithTx(func(tx *gorm.DB) error {
+		if err := s.repo.withDB(tx).CreateUser(user); err != nil {
+			return err
+		}
+		if err := s.accountService.
+			WithTransaction(tx).
+			CreateDefaultPaymentAccount(user.ID); err != nil {
+			return err
+		}
+		return s.userService.
+			WithTransaction(tx).
+			CreateEmptyProfile(user.ID)
+	})
 }
 
 // Login xử lý đăng nhập: trả về AuthResponse chứa cờ yêu cầu OTP SMS với user thường hoặc token trực tiếp với admin/super admin
@@ -146,8 +157,45 @@ func (s *Service) Login(req LoginRequest, userAgent string, ipAddress string, de
 			return &AuthResponse{TOTPRequired: true}, nil
 		}
 
-		if !totp.ValidateCode(user.TOTPSecret, req.TOTPCode) {
+		now := time.Now()
+		if user.TOTPLockedUntil != nil && user.TOTPLockedUntil.After(now) {
+			return nil, errors.New(
+				"Xác thực TOTP đang tạm khóa do nhập sai quá nhiều lần",
+			)
+		}
+		timeStep, valid := totp.MatchCodeAt(
+			user.TOTPSecret,
+			req.TOTPCode,
+			now,
+		)
+		if !valid {
+			lockedUntil, recordErr := s.repo.RecordTOTPFailure(
+				user.ID,
+				now,
+				5,
+				10*time.Minute,
+			)
+			if recordErr != nil {
+				return nil, recordErr
+			}
+			if lockedUntil != nil {
+				return nil, errors.New(
+					"Nhập sai TOTP quá nhiều lần, xác thực bị khóa 10 phút",
+				)
+			}
 			return nil, errors.New("Mã xác thực TOTP không đúng hoặc đã hết hạn")
+		}
+		if err := s.repo.RecordTOTPUsage(
+			user.ID,
+			timeStep,
+			"ADMIN_LOGIN",
+		); err != nil {
+			return nil, errors.New(
+				"Mã TOTP đã được sử dụng, vui lòng chờ mã mới",
+			)
+		}
+		if err := s.repo.ResetTOTPFailures(user.ID); err != nil {
+			return nil, err
 		}
 
 		// Tạo Access Token và Refresh Token ngay lập tức cho Admin/Super Admin

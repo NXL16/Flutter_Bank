@@ -18,5 +18,6 @@ func RegisterRoutes(
 		savingsGroup.GET("/products", handler.GetProducts)
 		savingsGroup.GET("", handler.GetMySavings)
 		savingsGroup.POST("", handler.OpenSavings)
+		savingsGroup.POST("/:accountNumber/withdraw", handler.WithdrawEarly)
 	}
 }

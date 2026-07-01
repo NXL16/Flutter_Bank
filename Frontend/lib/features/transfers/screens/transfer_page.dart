@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:gal/gal.dart';
 
 import '../../../core/network/api_service.dart';
 import '../../../core/services/bank_repository.dart';
@@ -29,6 +32,7 @@ class _TransferPageState extends State<TransferPage> {
   final _description = TextEditingController();
   final _repository = const TransferRepository();
   final _bankRepository = const BankRepository();
+  final _receiptBoundaryKey = GlobalKey();
 
   _TransferStep _step = _TransferStep.details;
   SessionUser? _user;
@@ -45,6 +49,7 @@ class _TransferPageState extends State<TransferPage> {
   bool _resolving = false;
   bool? _hasTransactionPin;
   bool _loading = false;
+  bool _savingReceipt = false;
 
   int get _parsedAmount =>
       int.tryParse(_amount.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
@@ -325,12 +330,15 @@ class _TransferPageState extends State<TransferPage> {
   Widget build(BuildContext context) => ListView(
     padding: EdgeInsets.zero,
     children: [
-      PageTitle(switch (_step) {
-        _TransferStep.details => 'Chuyển tiền tới tài khoản',
-        _TransferStep.confirmation => 'Xác nhận thông tin',
-        _TransferStep.receipt => 'Giao dịch hoàn tất',
-      }, subtitle: _subtitle),
-      const SizedBox(height: 12),
+      if (_step != _TransferStep.details) ...[
+        PageTitle(switch (_step) {
+          _TransferStep.details => '',
+          _TransferStep.confirmation => 'Xác nhận thông tin',
+          _TransferStep.receipt => 'Giao dịch hoàn tất',
+        }, subtitle: _subtitle),
+        const SizedBox(height: 12),
+      ] else
+        const SizedBox(height: 4),
       Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
@@ -360,120 +368,178 @@ class _TransferPageState extends State<TransferPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-            decoration: _panelDecoration(),
+          _transferSection(
+            title: 'Nguồn chuyển tiền',
+            icon: Icons.account_balance_wallet_outlined,
+            child: _SourceAccountCard(account: _sourceAccount),
+          ),
+          const SizedBox(height: 10),
+          _transferSection(
+            title: 'Chuyển đến',
+            icon: Icons.south_west_rounded,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const _SectionLabel('Nguồn chuyển tiền'),
-                const SizedBox(height: 7),
-                _SourceAccountCard(account: _sourceAccount),
-                Divider(height: 22, color: Colors.white.withValues(alpha: .08)),
-                const _SectionLabel('Chuyển đến'),
-                const SizedBox(height: 5),
                 const _BankSelector(),
-                if (_recentRecipients.isNotEmpty)
+                if (_recentRecipients.isNotEmpty) ...[
+                  const SizedBox(height: 2),
                   _RecentRecipientsButton(
                     count: _recentRecipients.length,
                     onTap: _showRecentRecipients,
                   ),
-                Divider(height: 1, color: Colors.white.withValues(alpha: .08)),
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: TextFormField(
-                    controller: _account,
-                    keyboardType: TextInputType.number,
-                    maxLength: 12,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      labelText: 'Số tài khoản',
-                      hintText: 'Nhập 12 chữ số',
-                      counterText: '',
-                      border: InputBorder.none,
-                      isDense: true,
-                      suffixIcon: Icon(Icons.contact_page_outlined),
-                    ),
-                    onChanged: _onAccountChanged,
-                    validator: (value) =>
-                        RegExp(r'^[0-9]{12}$').hasMatch(value?.trim() ?? '')
-                        ? null
-                        : 'Số tài khoản phải gồm 12 chữ số',
-                  ),
-                ),
-                if (_resolving)
-                  const LinearProgressIndicator(minHeight: 2)
-                else if (_recipient != null)
-                  _RecipientPreview(recipient: _recipient!)
-                else if (_resolutionError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 5),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _resolutionError!,
-                        style: const TextStyle(color: Color(0xFFFF8A80)),
+                ],
+                const SizedBox(height: 7),
+                TextFormField(
+                  controller: _account,
+                  keyboardType: TextInputType.number,
+                  maxLength: 12,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration:
+                      fieldDecoration(
+                        'Số tài khoản',
+                        hint: 'Nhập 12 chữ số',
+                      ).copyWith(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        counterText: '',
+                        suffixIcon: const Icon(
+                          Icons.contact_page_outlined,
+                          size: 20,
+                        ),
                       ),
+                  onChanged: _onAccountChanged,
+                  validator: (value) =>
+                      RegExp(r'^[0-9]{12}$').hasMatch(value?.trim() ?? '')
+                      ? null
+                      : 'Số tài khoản phải gồm 12 chữ số',
+                ),
+                if (_resolving) ...[
+                  const SizedBox(height: 7),
+                  const LinearProgressIndicator(minHeight: 2),
+                ] else if (_recipient != null) ...[
+                  const SizedBox(height: 8),
+                  _RecipientPreview(recipient: _recipient!),
+                ] else if (_resolutionError != null) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    _resolutionError!,
+                    style: const TextStyle(
+                      color: Color(0xFFFF8A80),
+                      fontSize: 12,
                     ),
                   ),
-                Divider(height: 18, color: Colors.white.withValues(alpha: .08)),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          _transferSection(
+            title: 'Số tiền chuyển',
+            icon: Icons.payments_outlined,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 TextFormField(
                   controller: _amount,
                   keyboardType: TextInputType.number,
                   inputFormatters: [CurrencyInputFormatter()],
                   style: const TextStyle(
-                    color: Color(0xFF9EA4FF),
-                    fontSize: 23,
+                    color: Color(0xFFB7BBFF),
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Số tiền',
-                    hintText: '0',
-                    suffixText: 'VND',
-                    border: InputBorder.none,
+                  decoration: fieldDecoration(
+                    'Số tiền',
+                  ).copyWith(
                     isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 13,
+                    ),
+                    suffixText: 'VND',
                   ),
                   onChanged: (_) => setState(() {}),
                   validator: (_) => _parsedAmount >= 10000
                       ? null
                       : 'Số tiền tối thiểu là 10.000 VND',
                 ),
-                if (_parsedAmount > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      _amountInWords,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                      ),
-                    ),
+                if (_parsedAmount > 0) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _amountInWords,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
-                Divider(height: 18, color: Colors.white.withValues(alpha: .08)),
-                TextFormField(
-                  controller: _description,
-                  maxLength: 140,
-                  decoration: InputDecoration(
-                    labelText: 'Nội dung chuyển tiền',
-                    hintText: _defaultDescription,
-                    counterText: '',
-                    border: InputBorder.none,
-                    isDense: true,
-                  ),
-                ),
+                ],
               ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          _transferSection(
+            title: 'Nội dung chuyển khoản',
+            icon: Icons.edit_note_rounded,
+            child: TextFormField(
+              controller: _description,
+              maxLength: 140,
+              decoration: fieldDecoration(
+                'Nội dung',
+                hint: _defaultDescription,
+              ).copyWith(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                counterText: '',
+              ),
             ),
           ),
           const SizedBox(height: 12),
           _BottomActions(
             primaryLabel: _loading ? 'Đang xác minh...' : 'Tiếp tục',
             onPrimary: _loading ? null : _review,
-            onBack: () => Navigator.maybePop(context),
+            showBack: false,
           ),
         ],
       ),
+    ),
+  );
+
+  Widget _transferSection({
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: _panelDecoration(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C83FD).withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 15, color: const Color(0xFF9EA4FF)),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        child,
+      ],
     ),
   );
 
@@ -590,61 +656,432 @@ class _TransferPageState extends State<TransferPage> {
 
   Widget _receiptCard() {
     final receipt = _receipt!;
-    return SurfaceCard(
+    final recipient = _recipient;
+    return Column(
       key: const ValueKey('receipt'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Icon(
-            Icons.check_circle_rounded,
-            color: Color(0xFF68D391),
-            size: 66,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RepaintBoundary(
+          key: _receiptBoundaryKey,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF19233B), Color(0xFF101729)],
+              ),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: const Color(0x337C83FD)),
+            ),
+            child: Column(
+              children: [
+                const _ReceiptHeader(),
+                const SizedBox(height: 22),
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: const BoxDecoration(
+                    color: Color(0x2668D391),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check_rounded,
+                    color: Color(0xFF68D391),
+                    size: 31,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Chuyển khoản thành công',
+                  style: TextStyle(
+                    color: Color(0xFFB9C4DC),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  money(receipt.amount, receipt.currency),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 29,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -.7,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  moneyInVietnameseWords(receipt.amount),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF7F8BA8),
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Divider(color: Colors.white.withValues(alpha: .08), height: 1),
+                const SizedBox(height: 17),
+                _ReceiptParty(
+                  label: 'NGƯỜI CHUYỂN',
+                  name: _user?.fullName ?? 'Người dùng NF Bank',
+                  accountNumber:
+                      _sourceAccount?['account_number']?.toString() ?? '—',
+                  avatarURL: _senderAvatarURL,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Divider(
+                          color: Colors.white.withValues(alpha: .06),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Icon(
+                          Icons.arrow_downward_rounded,
+                          size: 17,
+                          color: Color(0xFF7C83FD),
+                        ),
+                      ),
+                      Expanded(
+                        child: Divider(
+                          color: Colors.white.withValues(alpha: .06),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _ReceiptParty(
+                  label: 'NGƯỜI NHẬN',
+                  name: recipient?.accountName ?? '—',
+                  accountNumber: recipient?.accountNumber ?? '—',
+                  avatarURL: recipient?.avatarUrl ?? '',
+                ),
+                const SizedBox(height: 17),
+                Divider(color: Colors.white.withValues(alpha: .08), height: 1),
+                const SizedBox(height: 10),
+                _ReceiptRow('Mã giao dịch', receipt.referenceCode),
+                _ReceiptRow(
+                  'Thời gian',
+                  receipt.createdAt == null
+                      ? '—'
+                      : dateTimeText(receipt.createdAt),
+                ),
+                _ReceiptRow(
+                  'Nội dung',
+                  receipt.description.isEmpty
+                      ? 'Chuyển tiền'
+                      : receipt.description,
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0x1468D391),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.verified_user_outlined,
+                        color: Color(0xFF68D391),
+                        size: 16,
+                      ),
+                      SizedBox(width: 7),
+                      Text(
+                        'Giao dịch được bảo mật bởi NF Bank',
+                        style: TextStyle(
+                          color: Color(0xFF91DDB2),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            money(receipt.amount, receipt.currency),
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _recipient?.accountName ?? '',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70),
-          ),
-          const Divider(height: 34),
-          _InfoRow('Mã giao dịch', receipt.referenceCode),
-          _InfoRow('Trạng thái', receipt.status),
-          _InfoRow('Số tài khoản', _recipient?.accountNumber ?? ''),
-          _InfoRow(
-            'Nội dung',
-            receipt.description.isEmpty ? 'Chuyển tiền' : receipt.description,
-          ),
-          if (receipt.createdAt != null)
-            _InfoRow('Thời gian', dateTimeText(receipt.createdAt)),
-          const SizedBox(height: 22),
-          FilledButton(
-            onPressed: _reset,
-            child: const Text('Thực hiện giao dịch mới'),
-          ),
-        ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _savingReceipt ? null : _saveReceiptImage,
+                icon: _savingReceipt
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_rounded, size: 19),
+                label: Text(_savingReceipt ? 'Đang lưu...' : 'Lưu ảnh'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: FilledButton(
+                onPressed: _savingReceipt ? null : _reset,
+                child: const Text('Giao dịch mới'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveReceiptImage() async {
+    if (_savingReceipt) return;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(
+      context,
+    ).clamp(1.5, 2.5).toDouble();
+    setState(() => _savingReceipt = true);
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary =
+          _receiptBoundaryKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw StateError('Không tìm thấy vùng biên lai');
+      }
+      if (boundary.debugNeedsPaint) {
+        await WidgetsBinding.instance.endOfFrame;
+      }
+      final image = await boundary.toImage(pixelRatio: pixelRatio);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (byteData == null) {
+        throw StateError('Không thể tạo ảnh biên lai');
+      }
+
+      var hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        hasAccess = await Gal.requestAccess();
+      }
+      if (!hasAccess) {
+        throw StateError('Bạn chưa cấp quyền lưu ảnh');
+      }
+      final reference = _receipt?.referenceCode.replaceAll(
+        RegExp(r'[^A-Za-z0-9_-]'),
+        '_',
+      );
+      await Gal.putImageBytes(
+        byteData.buffer.asUint8List(),
+        name: 'NF_Bank_${reference ?? DateTime.now().millisecondsSinceEpoch}',
+      );
+      if (mounted) {
+        showMessage(context, 'Đã lưu ảnh biên lai vào thư viện');
+      }
+    } on GalException catch (error) {
+      if (mounted) {
+        showMessage(
+          context,
+          'Không thể lưu ảnh: ${error.type.message}',
+          error: true,
+        );
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        showMessage(
+          context,
+          'Tính năng lưu ảnh vừa được cài đặt. Hãy dừng hẳn app và chạy lại flutter run.',
+          error: true,
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        showMessage(
+          context,
+          'Không thể lưu ảnh biên lai (${error.code})',
+          error: true,
+        );
+      }
+    } catch (error) {
+      debugPrint('Save receipt failed: $error');
+      if (mounted) {
+        showMessage(
+          context,
+          error is StateError
+              ? error.message.toString()
+              : 'Không thể lưu ảnh biên lai',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingReceipt = false);
+    }
+  }
+}
+
+class _ReceiptHeader extends StatelessWidget {
+  const _ReceiptHeader();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+    children: [
+      _BankMark(),
+      SizedBox(width: 10),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'NF BANK',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.1,
+              ),
+            ),
+            Text(
+              'BIÊN LAI CHUYỂN KHOẢN',
+              style: TextStyle(
+                color: Color(0xFF7F8BA8),
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .8,
+              ),
+            ),
+          ],
+        ),
       ),
+      Text(
+        'NF • SECURE',
+        style: TextStyle(
+          color: Color(0xFF68D391),
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          letterSpacing: .6,
+        ),
+      ),
+    ],
+  );
+}
+
+class _ReceiptParty extends StatelessWidget {
+  const _ReceiptParty({
+    required this.label,
+    required this.name,
+    required this.accountNumber,
+    required this.avatarURL,
+  });
+
+  final String label;
+  final String name;
+  final String accountNumber;
+  final String avatarURL;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedURL = avatarURL.trim();
+    final initial = name.trim().isEmpty ? 'N' : name.trim()[0].toUpperCase();
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(1.5),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF7C83FD), width: 1.5),
+          ),
+          child: CircleAvatar(
+            radius: 19,
+            backgroundColor: const Color(0xFF293352),
+            backgroundImage: normalizedURL.startsWith('https://')
+                ? NetworkImage(normalizedURL)
+                : null,
+            child: normalizedURL.startsWith('https://')
+                ? null
+                : Text(
+                    initial,
+                    style: const TextStyle(
+                      color: Color(0xFFB7BBFF),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF7F8BA8),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .7,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                name.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                '$accountNumber · NF Bank',
+                style: const TextStyle(color: Color(0xFF9AA6C0), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.label);
+class _ReceiptRow extends StatelessWidget {
+  const _ReceiptRow(this.label, this.value);
 
   final String label;
+  final String value;
 
   @override
-  Widget build(BuildContext context) => Text(
-    label,
-    style: const TextStyle(
-      fontSize: 15,
-      fontWeight: FontWeight.w800,
-      letterSpacing: -.2,
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 92,
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFF7F8BA8), fontSize: 11),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              color: Color(0xFFDCE2F0),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -716,7 +1153,7 @@ class _BankSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.symmetric(vertical: 7),
+    padding: EdgeInsets.symmetric(vertical: 3),
     child: Row(
       children: [
         _BankMark(),
@@ -756,7 +1193,7 @@ class _RecentRecipientsButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
             const Icon(
@@ -981,49 +1418,53 @@ class _BottomActions extends StatelessWidget {
   const _BottomActions({
     required this.primaryLabel,
     required this.onPrimary,
-    required this.onBack,
+    this.onBack,
+    this.showBack = true,
   });
 
   final String primaryLabel;
   final VoidCallback? onPrimary;
   final VoidCallback? onBack;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) => Center(
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 390),
+      constraints: BoxConstraints(maxWidth: showBack ? 390 : 340),
       child: Row(
         children: [
-          Expanded(
-            flex: 2,
-            child: OutlinedButton(
-              onPressed: onBack,
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(44),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                side: const BorderSide(color: Color(0xFF7C83FD)),
-                foregroundColor: const Color(0xFFB7BBFF),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
+          if (showBack) ...[
+            Expanded(
+              flex: 2,
+              child: OutlinedButton(
+                onPressed: onBack,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  side: const BorderSide(color: Color(0xFF7C83FD)),
+                  foregroundColor: const Color(0xFFB7BBFF),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                ),
+                child: const Text(
+                  'Quay lại',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                 ),
               ),
-              child: const Text(
-                'Quay lại',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-              ),
             ),
-          ),
-          const SizedBox(width: 10),
+            const SizedBox(width: 10),
+          ],
           Expanded(
-            flex: 3,
+            flex: showBack ? 3 : 1,
             child: FilledButton(
               onPressed: onPrimary,
               style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(44),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size.fromHeight(48),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 backgroundColor: const Color(0xFF6D74F7),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(15),
                 ),
               ),
               child: Text(

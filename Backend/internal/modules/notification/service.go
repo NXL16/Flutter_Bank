@@ -29,7 +29,8 @@ func (s *Service) RegisterPushToken(userID uint, token, platform string) error {
 	if userID == 0 || len(token) < 20 {
 		return errors.New("Push token không hợp lệ")
 	}
-	if platform != "android" && platform != "ios" && platform != "web" {
+	if platform != "android" && platform != "ios" && platform != "web" &&
+		platform != "macos" && platform != "windows" && platform != "linux" {
 		return errors.New("Nền tảng push notification không hợp lệ")
 	}
 	return s.repo.UpsertPushToken(&PushToken{
@@ -125,6 +126,23 @@ func (s *Service) CreateNotification(tx *gorm.DB, userID uint, notiType, title, 
 	}
 
 	return s.repo.CreateNotification(tx, noti)
+}
+
+// CreateUserNotification dùng cho sự kiện đã commit hoặc không nằm trong
+// transaction tài chính hiện tại.
+func (s *Service) CreateUserNotification(
+	userID uint,
+	notiType string,
+	title string,
+	content string,
+) error {
+	return s.CreateNotification(
+		s.repo.db,
+		userID,
+		notiType,
+		title,
+		content,
+	)
 }
 
 // GetNotifications trả về danh sách toàn bộ thông báo của 1 user

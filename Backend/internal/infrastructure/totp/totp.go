@@ -21,27 +21,34 @@ func GenerateSecret() string {
 
 // ValidateCode kiểm tra mã code 6 số từ Google Authenticator so với khóa bí mật
 func ValidateCode(secret string, code string) bool {
+	_, valid := MatchCodeAt(secret, code, time.Now())
+	return valid
+}
+
+// MatchCodeAt trả về time-step đã khớp để tầng gọi có thể chống tái sử dụng
+// cùng một TOTP trong cửa sổ hiệu lực.
+func MatchCodeAt(secret string, code string, now time.Time) (int64, bool) {
 	secret = strings.ToUpper(strings.TrimSpace(secret))
 	if secret == "" || len(code) != 6 {
-		return false
+		return 0, false
 	}
 
 	key, err := decodeBase32(secret)
 	if err != nil {
-		return false
+		return 0, false
 	}
 
-	currentTime := time.Now().Unix()
+	currentTime := now.Unix()
 
 	// Cho phép sai số lệch thời gian +/- 30 giây (offset -1, 0, 1)
 	for _, offset := range []int64{-1, 0, 1} {
 		step := (currentTime / 30) + offset
 		if calculateTOTP(key, step) == code {
-			return true
+			return step, true
 		}
 	}
 
-	return false
+	return 0, false
 }
 
 // decodeBase32 giải mã chuỗi Base32 hỗ trợ tự động bù padding '='

@@ -1,7 +1,6 @@
-import 'dart:math';
-
 import '../../../core/constants/api_url.dart';
 import '../../../core/network/api_service.dart';
+import '../../../shared/utils/idempotency.dart' as idempotency;
 import '../models/account_resolution.dart';
 import '../models/transfer_receipt.dart';
 
@@ -54,12 +53,7 @@ class TransferRepository {
   }
 
   static String createIdempotencyKey() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-    final suffix = bytes
-        .map((value) => value.toRadixString(16).padLeft(2, '0'))
-        .join();
-    return '${DateTime.now().microsecondsSinceEpoch}:$suffix';
+    return idempotency.createIdempotencyKey();
   }
 
   static Map<String, dynamic> _map(dynamic value) =>

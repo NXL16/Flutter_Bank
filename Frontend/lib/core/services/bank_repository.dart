@@ -41,24 +41,6 @@ class BankRepository {
     )).data,
   );
 
-  Future<Map<String, dynamic>> transfer({
-    required String accountNumber,
-    required int amount,
-    required String description,
-    required String idToken,
-  }) async => _map(
-    (await ApiService.post(
-      ApiUrl.transfer,
-      auth: true,
-      body: {
-        'receiver_account_number': accountNumber,
-        'amount': amount,
-        'description': description,
-        'id_token': idToken,
-      },
-    )).data,
-  );
-
   Future<Map<String, dynamic>> openSavings({
     required int amount,
     required int termMonths,
@@ -85,6 +67,20 @@ class BankRepository {
 
   Future<List<Map<String, dynamic>>> savingsAccounts() async =>
       _list((await ApiService.get(ApiUrl.savings, auth: true)).data);
+
+  Future<Map<String, dynamic>> withdrawSavingsEarly({
+    required String accountNumber,
+    required int amount,
+    required String transactionPin,
+    required String idempotencyKey,
+  }) async => _map(
+    (await ApiService.post(
+      '${ApiUrl.savings}/$accountNumber/withdraw',
+      auth: true,
+      headers: {'Idempotency-Key': idempotencyKey},
+      body: {'amount': amount, 'transaction_pin': transactionPin},
+    )).data,
+  );
 
   Future<List<Map<String, dynamic>>> notifications() async =>
       _list((await ApiService.get(ApiUrl.notifications, auth: true)).data);

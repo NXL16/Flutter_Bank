@@ -39,6 +39,7 @@ type DepositRequest struct {
 	ReceiverAccountNumber string `json:"receiver_account_number" binding:"required"`
 	Amount                int64  `json:"amount" binding:"required,gt=0"`
 	Description           string `json:"description"`
+	IdempotencyKey        string `json:"-"`
 }
 
 type TransactionPINStatusResponse struct {

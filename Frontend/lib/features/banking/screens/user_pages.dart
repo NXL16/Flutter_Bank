@@ -8,6 +8,7 @@ import '../../../core/services/bank_repository.dart';
 import '../../../core/storage/token_storage.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/common.dart';
+import '../../admin/widgets/admin_detail_dialog.dart';
 import '../../auth/services/auth_service.dart';
 import '../../auth/services/phone_auth_service.dart';
 import '../../transfers/screens/transfer_page.dart'
@@ -94,7 +95,8 @@ class _DashboardPageState extends State<DashboardPage> {
               final savingsAccounts = accounts
                   .where(
                     (account) =>
-                        account['account_type']?.toString() == 'SAVINGS',
+                        account['account_type']?.toString() == 'SAVINGS' &&
+                        account['status']?.toString() == 'ACTIVE',
                   )
                   .toList();
               final regularAccounts = accounts
@@ -294,10 +296,15 @@ class _AccountsPageState extends State<AccountsPage> {
     load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       accounts = await _repo.accounts();
-      error = null;
     } catch (e) {
       error = '$e';
     } finally {
@@ -309,6 +316,7 @@ class _AccountsPageState extends State<AccountsPage> {
   Widget build(BuildContext context) => AsyncPage(
     loading: loading,
     error: error,
+    onRetry: load,
     child: ListView(
       children: [
         const PageTitle(
@@ -375,122 +383,6 @@ class _AccountsPageState extends State<AccountsPage> {
   );
 }
 
-class TransferPage extends StatefulWidget {
-  const TransferPage({super.key});
-
-  @override
-  State<TransferPage> createState() => _TransferPageState();
-}
-
-class _TransferPageState extends State<TransferPage> {
-  final form = GlobalKey<FormState>();
-  final account = TextEditingController();
-  final amount = TextEditingController();
-  final description = TextEditingController();
-  bool loading = false;
-
-  Future<void> submit() async {
-    if (!form.currentState!.validate()) return;
-    setState(() => loading = true);
-    try {
-      final result = await _repo.transfer(
-        accountNumber: account.text.trim(),
-        amount: int.parse(amount.text.replaceAll('.', '')),
-        description: description.text.trim(),
-        idToken: '', // Firebase tạm bỏ qua khi test
-      );
-      if (mounted) {
-        showDialog<void>(
-          context: context,
-          builder: (_) => AlertDialog(
-            icon: const Icon(
-              Icons.check_circle_rounded,
-              size: 54,
-              color: Color(0xFF68D391),
-            ),
-            title: const Text('Chuyển tiền thành công'),
-            content: Text(
-              'Mã giao dịch: ${result['reference_code'] ?? '—'}\n'
-              'Số tiền: ${money(result['amount'])}',
-              textAlign: TextAlign.center,
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Hoàn tất'),
-              ),
-            ],
-          ),
-        );
-        form.currentState!.reset();
-        account.clear();
-        amount.clear();
-        description.clear();
-      }
-    } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    children: [
-      const PageTitle(
-        'Chuyển tiền',
-        subtitle: 'Chuyển khoản nội bộ NF Bank theo số tài khoản.',
-      ),
-      const SizedBox(height: 20),
-      Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: SurfaceCard(
-            child: Form(
-              key: form,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextFormField(
-                    controller: account,
-                    decoration: fieldDecoration('Số tài khoản người nhận'),
-                    validator: _required,
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: amount,
-                    keyboardType: TextInputType.number,
-                    decoration: fieldDecoration('Số tiền (VND)'),
-                    validator: (value) =>
-                        (int.tryParse(value?.replaceAll('.', '') ?? '') ?? 0) >
-                            0
-                        ? null
-                        : 'Số tiền phải lớn hơn 0',
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: description,
-                    decoration: fieldDecoration('Nội dung chuyển tiền'),
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: loading ? null : submit,
-                    icon: const Icon(Icons.send_rounded),
-                    label: const Text('Xác nhận chuyển tiền'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ],
-  );
-
-  String? _required(String? value) =>
-      value == null || value.trim().isEmpty ? 'Không được để trống' : null;
-}
-
 class TransactionsPage extends StatefulWidget {
   const TransactionsPage({super.key});
 
@@ -510,10 +402,15 @@ class _TransactionsPageState extends State<TransactionsPage> {
     load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       items = await _repo.transactions();
-      error = null;
     } catch (e) {
       error = '$e';
     } finally {
@@ -527,32 +424,35 @@ class _TransactionsPageState extends State<TransactionsPage> {
         tx['reference_code']?.toString() ?? '',
       );
       if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Chi tiết giao dịch'),
-          content: SizedBox(
-            width: 430,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _DetailRow('Mã giao dịch', data['reference_code']),
-                _DetailRow('Loại', data['type']),
-                _DetailRow('Số tiền', money(data['amount'], data['currency'])),
-                _DetailRow('Trạng thái', data['status']),
-                _DetailRow('Nội dung', data['description']),
-                // _DetailRow('Tài khoản gửi', data['sender_account_id']),
-                // _DetailRow('Tài khoản nhận', data['receiver_account_id']),
-              ],
-            ),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Đóng'),
-            ),
-          ],
-        ),
+      final direction = data['direction']?.toString().toUpperCase() ?? 'IN';
+      final type = data['type']?.toString().toUpperCase() ?? 'GIAO DỊCH';
+      final counterparty = data['counterparty_name']?.toString().trim() ?? '';
+      final incoming = direction == 'IN';
+      final sender = incoming
+          ? type == 'DEPOSIT'
+                ? 'Hệ thống / Admin'
+                : counterparty.isEmpty
+                ? 'Hệ thống / Chuyển khoản'
+                : counterparty
+          : 'Bạn';
+      final receiver = incoming
+          ? 'Bạn'
+          : type == 'WITHDRAWAL'
+          ? 'Rút tiền mặt'
+          : counterparty.isEmpty
+          ? 'Người nhận'
+          : counterparty;
+      await showAdminTransactionDetail(
+        context,
+        referenceCode: data['reference_code']?.toString() ?? '—',
+        type: type,
+        amount: data['amount'],
+        currency: data['currency']?.toString() ?? 'VND',
+        status: data['status']?.toString() ?? 'SUCCESS',
+        description: data['description']?.toString() ?? '',
+        createdAt: data['created_at'],
+        sender: sender,
+        receiver: receiver,
       );
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
@@ -570,6 +470,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     return AsyncPage(
       loading: loading,
       error: error,
+      onRetry: load,
       child: ListView(
         children: [
           const PageTitle(
@@ -620,6 +521,7 @@ class _SavingsPageState extends State<SavingsPage> {
   final amount = TextEditingController();
   final pinRepository = const TransferRepository();
   bool initialLoading = true;
+  String? contextError;
   bool loading = false;
   bool showOpenForm = false;
   bool? hasTransactionPIN;
@@ -629,6 +531,7 @@ class _SavingsPageState extends State<SavingsPage> {
   int termMonths = 12;
   String maturityInstruction = 'PAYOUT';
   String? savingsRequestID;
+  final Map<String, ({int amount, String key})> withdrawalRequests = {};
 
   int get parsedAmount =>
       int.tryParse(amount.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
@@ -660,7 +563,16 @@ class _SavingsPageState extends State<SavingsPage> {
     super.dispose();
   }
 
-  Future<void> loadContext({bool initializeView = false}) async {
+  Future<void> loadContext({
+    bool initializeView = false,
+    bool showLoading = false,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        initialLoading = true;
+        contextError = null;
+      });
+    }
     try {
       final responses = await Future.wait([
         _repo.accounts(),
@@ -692,11 +604,15 @@ class _SavingsPageState extends State<SavingsPage> {
               (loadedProducts.first['term_months'] as num?)?.toInt() ?? 12;
         }
         if (initializeView) showOpenForm = loadedSavings.isEmpty;
+        contextError = null;
         initialLoading = false;
       });
     } on ApiException catch (error) {
       if (!mounted) return;
-      setState(() => initialLoading = false);
+      setState(() {
+        contextError = error.message;
+        initialLoading = false;
+      });
       showMessage(context, error.message, error: true);
     }
   }
@@ -795,14 +711,93 @@ class _SavingsPageState extends State<SavingsPage> {
     }
   }
 
-  void showSavingsDetail(Map<String, dynamic> item) {
-    showModalBottomSheet<void>(
+  Future<void> showSavingsDetail(Map<String, dynamic> item) async {
+    final withdraw = await showModalBottomSheet<bool>(
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _SavingsDetailSheet(item: item),
     );
+    if (withdraw == true && mounted) {
+      await requestEarlyWithdrawal(item);
+    }
+  }
+
+  Future<void> requestEarlyWithdrawal(Map<String, dynamic> item) async {
+    final principal = (item['original_principal'] as num?)?.toInt() ?? 0;
+    final amountToWithdraw = await showModalBottomSheet<int>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SavingsWithdrawalSheet(
+        principal: principal,
+        startDate: DateTime.tryParse(item['start_date']?.toString() ?? ''),
+        demandInterestRate:
+            (item['demand_interest_rate'] as num?)?.toDouble() ?? .5,
+      ),
+    );
+    if (amountToWithdraw == null || !mounted) return;
+
+    bool hasPIN;
+    try {
+      hasPIN = hasTransactionPIN ?? await pinRepository.hasTransactionPin();
+    } on ApiException catch (error) {
+      if (mounted) {
+        showMessage(context, error.message, error: true, transaction: true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    final pinInput = await showTransactionPINSheet(
+      context,
+      createPIN: !hasPIN,
+      actionLabel: 'rút tiết kiệm trước hạn',
+    );
+    if (pinInput == null || !mounted) return;
+
+    final accountNumber = item['account_number']?.toString() ?? '';
+    final previousRequest = withdrawalRequests[accountNumber];
+    final request = previousRequest?.amount == amountToWithdraw
+        ? previousRequest!
+        : (
+            amount: amountToWithdraw,
+            key: TransferRepository.createIdempotencyKey(),
+          );
+    withdrawalRequests[accountNumber] = request;
+    setState(() => loading = true);
+    try {
+      if (!hasPIN) {
+        await pinRepository.setupTransactionPin(
+          pinInput.pin,
+          pinInput.confirmPIN!,
+        );
+        hasTransactionPIN = true;
+      }
+      final result = await _repo.withdrawSavingsEarly(
+        accountNumber: accountNumber,
+        amount: amountToWithdraw,
+        transactionPin: pinInput.pin,
+        idempotencyKey: request.key,
+      );
+      withdrawalRequests.remove(accountNumber);
+      await loadContext();
+      if (!mounted) return;
+      showMessage(
+        context,
+        result['is_full_withdrawal'] == true
+            ? 'Đã tất toán sổ trước hạn'
+            : 'Rút một phần tiền gửi thành công',
+        transaction: true,
+      );
+    } on ApiException catch (error) {
+      if (mounted) {
+        showMessage(context, error.message, error: true, transaction: true);
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
   }
 
   @override
@@ -810,18 +805,46 @@ class _SavingsPageState extends State<SavingsPage> {
     if (initialLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (contextError != null &&
+        sourceAccount == null &&
+        products.isEmpty &&
+        savingsAccounts.isEmpty) {
+      return EmptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Không tải được tiết kiệm',
+        message: contextError!,
+        actionLabel: 'Thử lại',
+        onAction: () => loadContext(initializeView: true, showLoading: true),
+      );
+    }
     final totalPrincipal = savingsAccounts.fold<int>(
       0,
-      (total, item) =>
-          total + ((item['original_principal'] as num?)?.toInt() ?? 0),
+      (total, item) => item['is_settled'] == true
+          ? total
+          : total + ((item['original_principal'] as num?)?.toInt() ?? 0),
     );
+    final activeSavings = savingsAccounts
+        .where(
+          (item) =>
+              item['is_settled'] != true &&
+              item['status']?.toString() == 'ACTIVE',
+        )
+        .toList();
+    final settledSavings = savingsAccounts
+        .where(
+          (item) =>
+              item['is_settled'] == true ||
+              item['status']?.toString() == 'CLOSED',
+        )
+        .toList();
     return ListView(
       children: [
         PageTitle(
           'Tiết kiệm trực tuyến',
           subtitle: showOpenForm
               ? 'Chọn kỳ hạn và kiểm tra quyền lợi trước khi xác nhận.'
-              : '${savingsAccounts.length} sổ đang quản lý',
+              : '${activeSavings.length} sổ đang hoạt động'
+                    '${settledSavings.isEmpty ? '' : ' · ${settledSavings.length} sổ đã tất toán'}',
           trailing: savingsAccounts.isNotEmpty && !showOpenForm
               ? FilledButton.icon(
                   onPressed: () => setState(() => showOpenForm = true),
@@ -836,14 +859,22 @@ class _SavingsPageState extends State<SavingsPage> {
             constraints: const BoxConstraints(maxWidth: 680),
             child: showOpenForm
                 ? _buildOpenForm()
-                : _buildSavingsList(totalPrincipal),
+                : _buildSavingsList(
+                    totalPrincipal,
+                    activeSavings,
+                    settledSavings,
+                  ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSavingsList(int totalPrincipal) => Column(
+  Widget _buildSavingsList(
+    int totalPrincipal,
+    List<Map<String, dynamic>> activeSavings,
+    List<Map<String, dynamic>> settledSavings,
+  ) => Column(
     children: [
       Container(
         width: double.infinity,
@@ -868,16 +899,47 @@ class _SavingsPageState extends State<SavingsPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              '${savingsAccounts.length} khoản tiền gửi có kỳ hạn',
+              '${activeSavings.length} khoản tiền gửi đang sinh lãi',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ],
         ),
       ),
       const SizedBox(height: 12),
-      for (final item in savingsAccounts) ...[
+      if (activeSavings.isEmpty)
+        const EmptyState(
+          icon: Icons.savings_outlined,
+          title: 'Không có sổ đang hoạt động',
+          message: 'Bạn có thể mở một sổ tiết kiệm mới bất cứ lúc nào.',
+        )
+      else ...[
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Đang hoạt động',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const SizedBox(height: 9),
+      ],
+      for (final item in activeSavings) ...[
         _SavingsAccountCard(item: item, onTap: () => showSavingsDetail(item)),
         const SizedBox(height: 10),
+      ],
+      if (settledSavings.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Đã tất toán',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const SizedBox(height: 9),
+        for (final item in settledSavings) ...[
+          _SavingsAccountCard(item: item, onTap: () => showSavingsDetail(item)),
+          const SizedBox(height: 10),
+        ],
       ],
     ],
   );
@@ -991,17 +1053,18 @@ class _SavingsPageState extends State<SavingsPage> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [5000000, 10000000, 20000000, 50000000]
-                  .map(
-                    (value) => ActionChip(
-                      label: Text(money(value).replaceAll(' VND', '')),
-                      onPressed: () {
-                        amount.text = formatCurrencyInput(value);
-                        setState(() => savingsRequestID = null);
-                      },
-                    ),
-                  )
-                  .toList(),
+              children:
+                  [5000000, 10000000, 20000000, 50000000, 100000000, 200000000]
+                      .map(
+                        (value) => ActionChip(
+                          label: Text(money(value).replaceAll(' VND', '')),
+                          onPressed: () {
+                            amount.text = formatCurrencyInput(value);
+                            setState(() => savingsRequestID = null);
+                          },
+                        ),
+                      )
+                      .toList(),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -1065,85 +1128,112 @@ class _SavingsAccountCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: EdgeInsets.zero,
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: const Color(0xFF7C83FD).withValues(alpha: .14),
-                borderRadius: BorderRadius.circular(13),
+  Widget build(BuildContext context) {
+    final settled =
+        item['is_settled'] == true || item['status']?.toString() == 'CLOSED';
+    final earlyClosed =
+        item['closure_reason']?.toString() == 'EARLY_WITHDRAWAL';
+    final renewalCount = (item['renewal_count'] as num?)?.toInt() ?? 0;
+    return SurfaceCard(
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C83FD).withValues(alpha: .14),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.savings_rounded,
+                  color: Color(0xFF9EA4FF),
+                ),
               ),
-              child: const Icon(
-                Icons.savings_rounded,
-                color: Color(0xFF9EA4FF),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      money(item['original_principal']),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${item['term_months']} tháng · ${item['interest_rate']}%/năm',
+                      style: const TextStyle(
+                        color: Color(0xFF9BA8C7),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      settled
+                          ? '${earlyClosed ? 'Rút trước hạn' : 'Tất toán'} '
+                                '${shortDate(item['closed_at'] ?? item['last_matured_at'])}'
+                          : 'Đáo hạn ${shortDate(item['end_date'])}'
+                                '${renewalCount > 0 ? ' · Đã tái tục $renewalCount lần' : ''}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    money(item['original_principal']),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (settled
+                                  ? const Color(0xFF9BA8C7)
+                                  : const Color(0xFF68D391))
+                              .withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      settled
+                          ? earlyClosed
+                                ? 'Đã rút trước hạn'
+                                : 'Đã tất toán'
+                          : 'Đang hoạt động',
+                      style: TextStyle(
+                        color: settled
+                            ? const Color(0xFF9BA8C7)
+                            : const Color(0xFF68D391),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${item['term_months']} tháng · ${item['interest_rate']}%/năm',
-                    style: const TextStyle(
-                      color: Color(0xFF9BA8C7),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Đáo hạn ${shortDate(item['end_date'])}',
-                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  const SizedBox(height: 8),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white38,
                   ),
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF68D391).withValues(alpha: .12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'Đang hoạt động',
-                    style: TextStyle(
-                      color: Color(0xFF68D391),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Icon(Icons.chevron_right_rounded, color: Colors.white38),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SavingsDetailSheet extends StatelessWidget {
@@ -1152,55 +1242,512 @@ class _SavingsDetailSheet extends StatelessWidget {
   final Map<String, dynamic> item;
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(
-      color: Color(0xFF151D31),
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  Widget build(BuildContext context) {
+    final settled =
+        item['is_settled'] == true || item['status']?.toString() == 'CLOSED';
+    final earlyClosed =
+        item['closure_reason']?.toString() == 'EARLY_WITHDRAWAL';
+    final renewalCount = (item['renewal_count'] as num?)?.toInt() ?? 0;
+    final history =
+        (item['maturity_history'] as List?)
+            ?.whereType<Map>()
+            .map((event) => Map<String, dynamic>.from(event))
+            .toList() ??
+        const <Map<String, dynamic>>[];
+    final withdrawalHistory =
+        (item['withdrawal_history'] as List?)
+            ?.whereType<Map>()
+            .map((event) => Map<String, dynamic>.from(event))
+            .toList() ??
+        const <Map<String, dynamic>>[];
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .86,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF151D31),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Chi tiết sổ tiết kiệm',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                fit: FlexFit.loose,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    _SavingsDetailRow(
+                      'Trạng thái',
+                      settled
+                          ? earlyClosed
+                                ? 'Đã rút trước hạn'
+                                : 'Đã tất toán'
+                          : 'Đang hoạt động',
+                    ),
+                    _SavingsDetailRow('Số tài khoản', item['account_number']),
+                    _SavingsDetailRow(
+                      'Tiền gốc',
+                      money(item['original_principal']),
+                    ),
+                    _SavingsDetailRow('Kỳ hạn', '${item['term_months']} tháng'),
+                    _SavingsDetailRow(
+                      'Lãi suất',
+                      '${item['interest_rate']}%/năm',
+                    ),
+                    _SavingsDetailRow(
+                      'Ngày bắt đầu kỳ',
+                      shortDate(item['start_date']),
+                    ),
+                    _SavingsDetailRow(
+                      'Ngày đáo hạn',
+                      shortDate(item['end_date']),
+                    ),
+                    if (!earlyClosed) ...[
+                      _SavingsDetailRow(
+                        'Tiền lãi dự kiến',
+                        money(item['expected_interest']),
+                      ),
+                      _SavingsDetailRow(
+                        'Tổng tiền đáo hạn',
+                        money(item['maturity_amount']),
+                      ),
+                    ],
+                    _SavingsDetailRow(
+                      'Chỉ thị đáo hạn',
+                      _maturityInstructionLabel(
+                        item['maturity_instruction']?.toString() ?? 'PAYOUT',
+                      ),
+                    ),
+                    if (renewalCount > 0)
+                      _SavingsDetailRow('Số lần tái tục', '$renewalCount lần'),
+                    if (item['last_matured_at'] != null)
+                      _SavingsDetailRow(
+                        'Xử lý gần nhất',
+                        dateTimeText(item['last_matured_at']),
+                      ),
+                    if (item['closed_at'] != null)
+                      _SavingsDetailRow(
+                        'Ngày đóng sổ',
+                        dateTimeText(item['closed_at']),
+                      ),
+                    if (history.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Lịch sử đáo hạn',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final event in history)
+                        _SavingsMaturityHistoryTile(event: event),
+                    ],
+                    if (withdrawalHistory.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Lịch sử rút trước hạn',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final event in withdrawalHistory)
+                        _SavingsWithdrawalHistoryTile(event: event),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  if (!settled) ...[
+                    Expanded(
+                      flex: 4,
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text(
+                          'Rút trước hạn',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    flex: settled ? 1 : 5,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Đóng'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SavingsDetailRow extends StatelessWidget {
+  const _SavingsDetailRow(this.label, this.value);
+
+  final String label;
+  final dynamic value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          child: Text(
+            value?.toString() ?? '—',
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              color: Color(0xFFE8ECF7),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     ),
-    child: SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 42,
-              height: 3,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(20),
+  );
+}
+
+class _SavingsMaturityHistoryTile extends StatelessWidget {
+  const _SavingsMaturityHistoryTile({required this.event});
+
+  final Map<String, dynamic> event;
+
+  @override
+  Widget build(BuildContext context) {
+    final renewed = event['outcome']?.toString() == 'RENEWED';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11192B),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: .06)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            renewed ? Icons.autorenew_rounded : Icons.check_circle_outline,
+            size: 20,
+            color: renewed ? const Color(0xFF9EA4FF) : const Color(0xFF68D391),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  renewed
+                      ? 'Kỳ ${event['cycle_number']} · Đã tái tục'
+                      : 'Kỳ ${event['cycle_number']} · Đã tất toán',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${shortDate(event['period_start'])} – ${shortDate(event['period_end'])}'
+                  ' · Lãi ${money(event['interest'])}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SavingsWithdrawalHistoryTile extends StatelessWidget {
+  const _SavingsWithdrawalHistoryTile({required this.event});
+
+  final Map<String, dynamic> event;
+
+  @override
+  Widget build(BuildContext context) {
+    final full = event['is_full_withdrawal'] == true;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11192B),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: .06)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.account_balance_wallet_outlined,
+            size: 20,
+            color: Color(0xFFFFB86B),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  full ? 'Tất toán trước hạn' : 'Rút một phần',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${dateTimeText(event['processed_at'])} · Gốc ${money(event['amount'])}'
+                  ' · Lãi ${money(event['interest'])}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SavingsWithdrawalSheet extends StatefulWidget {
+  const _SavingsWithdrawalSheet({
+    required this.principal,
+    required this.startDate,
+    required this.demandInterestRate,
+  });
+
+  final int principal;
+  final DateTime? startDate;
+  final double demandInterestRate;
+
+  @override
+  State<_SavingsWithdrawalSheet> createState() =>
+      _SavingsWithdrawalSheetState();
+}
+
+class _SavingsWithdrawalSheetState extends State<_SavingsWithdrawalSheet> {
+  final amount = TextEditingController();
+  String? error;
+
+  int get parsedAmount =>
+      int.tryParse(amount.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+  int get remainingPrincipal => widget.principal - parsedAmount;
+  int get accruedDays {
+    final startDate = widget.startDate;
+    if (startDate == null) return 0;
+    final days = DateTime.now().difference(startDate.toLocal()).inDays;
+    return days > 0 ? days : 0;
+  }
+
+  int get estimatedInterest =>
+      (parsedAmount * widget.demandInterestRate / 100 * accruedDays / 365)
+          .round();
+
+  @override
+  void dispose() {
+    amount.dispose();
+    super.dispose();
+  }
+
+  void submit() {
+    String? validationError;
+    if (parsedAmount < 100000) {
+      validationError = 'Số tiền rút tối thiểu là 100.000 VND';
+    } else if (parsedAmount > widget.principal) {
+      validationError = 'Số tiền rút vượt quá tiền gốc hiện có';
+    } else if (remainingPrincipal > 0 && remainingPrincipal < 5000000) {
+      validationError =
+          'Số dư còn lại phải từ 5.000.000 VND hoặc bạn cần rút toàn bộ';
+    }
+    if (validationError != null) {
+      setState(() => error = validationError);
+      return;
+    }
+    Navigator.pop(context, parsedAmount);
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedPadding(
+    duration: const Duration(milliseconds: 180),
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF151D31),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'Chi tiết sổ tiết kiệm',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 16),
-            _DetailRow('Số tài khoản', item['account_number']),
-            _DetailRow('Tiền gốc', money(item['original_principal'])),
-            _DetailRow('Kỳ hạn', '${item['term_months']} tháng'),
-            _DetailRow('Lãi suất', '${item['interest_rate']}%/năm'),
-            _DetailRow('Ngày mở', shortDate(item['start_date'])),
-            _DetailRow('Ngày đáo hạn', shortDate(item['end_date'])),
-            _DetailRow('Tiền lãi dự kiến', money(item['expected_interest'])),
-            _DetailRow('Tổng tiền đáo hạn', money(item['maturity_amount'])),
-            _DetailRow(
-              'Chỉ thị đáo hạn',
-              _maturityInstructionLabel(
-                item['maturity_instruction']?.toString() ?? 'PAYOUT',
+              const SizedBox(height: 17),
+              const Text(
+                'Rút tiết kiệm trước hạn',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
               ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Đóng'),
+              const SizedBox(height: 7),
+              const Text(
+                'Phần tiền rút trước hạn chỉ hưởng lãi không kỳ hạn theo số ngày thực gửi.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF9BA8C7),
+                  fontSize: 12,
+                  height: 1.35,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              TextField(
+                controller: amount,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                inputFormatters: [CurrencyInputFormatter()],
+                onChanged: (_) => setState(() => error = null),
+                decoration: fieldDecoration(
+                  'Số tiền muốn rút',
+                  hint: 'Tối thiểu 100.000',
+                ).copyWith(suffixText: 'VND'),
+              ),
+              if (parsedAmount > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  moneyInVietnameseWords(parsedAmount),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ActionChip(
+                  label: Text(
+                    'Rút toàn bộ ${money(widget.principal).replaceAll(' VND', '')}',
+                  ),
+                  onPressed: () {
+                    amount.text = formatCurrencyInput(widget.principal);
+                    setState(() => error = null);
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF11192B),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    _SavingsDetailRow('Số ngày thực gửi', '$accruedDays ngày'),
+                    _SavingsDetailRow(
+                      'Lãi suất không kỳ hạn',
+                      '${widget.demandInterestRate}%/năm',
+                    ),
+                    _SavingsDetailRow(
+                      'Lãi không kỳ hạn dự kiến',
+                      money(estimatedInterest),
+                    ),
+                    _SavingsDetailRow(
+                      'Tổng tiền nhận',
+                      money(parsedAmount + estimatedInterest),
+                    ),
+                    _SavingsDetailRow(
+                      'Tiền gốc còn lại',
+                      money(remainingPrincipal < 0 ? 0 : remainingPrincipal),
+                    ),
+                  ],
+                ),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFFF8A9B),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Hủy'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton(
+                      onPressed: parsedAmount > 0 ? submit : null,
+                      child: const Text('Tiếp tục'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -1316,10 +1863,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       items = await _repo.notifications();
-      error = null;
       widget.onUnreadCountChanged?.call(
         items.where((item) => item['is_read'] != true).length,
       );
@@ -1333,7 +1885,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Future<void> markAll() async {
     try {
       await _repo.markAllNotificationsRead();
-      await load();
+      await load(showLoading: false);
+    } on ApiException catch (e) {
+      if (mounted) showMessage(context, e.message, error: true);
+    }
+  }
+
+  Future<void> markRead(Map<String, dynamic> item) async {
+    try {
+      final id = (item['id'] as num?)?.toInt();
+      if (id == null) {
+        throw const ApiException('Thông báo không hợp lệ');
+      }
+      await _repo.markNotificationRead(id);
+      await load(showLoading: false);
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
     }
@@ -1343,6 +1908,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Widget build(BuildContext context) => AsyncPage(
     loading: loading,
     error: error,
+    onRetry: load,
     child: ListView(
       children: [
         PageTitle(
@@ -1387,14 +1953,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     '${item['content'] ?? ''}\n${dateTimeText(item['created_at'])}',
                   ),
                 ),
-                onTap: item['is_read'] == true
-                    ? null
-                    : () async {
-                        await _repo.markNotificationRead(
-                          (item['id'] as num).toInt(),
-                        );
-                        await load();
-                      },
+                onTap: item['is_read'] == true ? null : () => markRead(item),
               ),
             ),
             const SizedBox(height: 10),
@@ -1441,14 +2000,26 @@ class _ProfilePageState extends State<ProfilePage> {
     load();
   }
 
-  Future<void> load() async {
+  @override
+  void dispose() {
+    address.dispose();
+    date.dispose();
+    super.dispose();
+  }
+
+  Future<void> load({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       profile = await _repo.profile();
       address.text = profile['address']?.toString() ?? '';
       avatarUrl = profile['avatar_url']?.toString() ?? '';
       date.text = profile['date_of_birth']?.toString().split('T').first ?? '';
       gender = profile['gender']?.toString() ?? '';
-      error = null;
     } catch (e) {
       error = '$e';
     } finally {
@@ -1480,7 +2051,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (mounted) {
         showMessage(context, 'Đã cập nhật hồ sơ');
       }
-      await load();
+      await load(showLoading: false);
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
     } finally {
@@ -1633,87 +2204,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> changePassword() async {
-    final old = TextEditingController();
-    final next = TextEditingController();
-    final confirm = TextEditingController();
     final draft = await showDialog<_PasswordChangeDraft>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Đổi mật khẩu'),
-        content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: old,
-                obscureText: true,
-                decoration: fieldDecoration('Mật khẩu hiện tại'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: next,
-                obscureText: true,
-                decoration: fieldDecoration('Mật khẩu mới'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: confirm,
-                obscureText: true,
-                decoration: fieldDecoration('Nhập lại mật khẩu mới'),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Sau bước này, mã OTP sẽ được gửi tới số điện thoại của bạn.',
-                style: TextStyle(color: Color(0xFF9BA8C7), fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Hủy'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (old.text.isEmpty) {
-                showMessage(
-                  dialogContext,
-                  'Vui lòng nhập mật khẩu hiện tại',
-                  error: true,
-                );
-                return;
-              }
-              if (next.text.length < 8) {
-                showMessage(
-                  dialogContext,
-                  'Mật khẩu mới phải có ít nhất 8 ký tự',
-                  error: true,
-                );
-                return;
-              }
-              if (next.text != confirm.text) {
-                showMessage(
-                  dialogContext,
-                  'Mật khẩu nhập lại không khớp',
-                  error: true,
-                );
-                return;
-              }
-              Navigator.pop(
-                dialogContext,
-                _PasswordChangeDraft(old.text, next.text),
-              );
-            },
-            child: const Text('Gửi mã OTP'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) => const _PasswordChangeDialog(),
     );
-    old.dispose();
-    next.dispose();
-    confirm.dispose();
     if (draft == null || !mounted) return;
 
     final phone = profile['phone']?.toString() ?? '';
@@ -1726,79 +2220,80 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
 
+    bool showingLoading = false;
+    void showLoading(String message) {
+      if (showingLoading) {
+        Navigator.pop(context);
+        showingLoading = false;
+      }
+      showingLoading = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _LoadingDialog(message: message),
+      ).then((_) => showingLoading = false);
+    }
+
+    void dismissLoading() {
+      if (showingLoading && mounted) {
+        Navigator.pop(context);
+        showingLoading = false;
+      }
+    }
+
     try {
+      showLoading('Đang gửi mã OTP...');
       final phoneAuth = PhoneAuthService();
       final verificationID = await phoneAuth.sendCode(phone);
+      dismissLoading();
+
       if (!mounted) return;
+      showMessage(
+        context,
+        'Đã gửi mã OTP về số điện thoại ${_maskPhone(phone)}',
+      );
 
       String idToken;
       if (verificationID.startsWith('AUTO:')) {
+        showLoading('Đang xác thực tự động...');
         idToken = await phoneAuth.verifyCode(verificationID, '');
+        dismissLoading();
       } else {
-        final otp = TextEditingController();
         final smsCode = await showDialog<String>(
           context: context,
           barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Xác nhận OTP'),
-            content: SizedBox(
-              width: 400,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Nhập mã gồm 6 số đã gửi tới ${_maskPhone(phone)}.',
-                    style: const TextStyle(color: Color(0xFF9BA8C7)),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: otp,
-                    autofocus: true,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    decoration: fieldDecoration('Mã OTP').copyWith(
-                      counterText: '',
-                      prefixIcon: const Icon(Icons.sms_outlined),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Hủy'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (!RegExp(r'^\d{6}$').hasMatch(otp.text.trim())) {
-                    showMessage(
-                      dialogContext,
-                      'Mã OTP phải gồm đúng 6 số',
-                      error: true,
-                    );
-                    return;
-                  }
-                  Navigator.pop(dialogContext, otp.text.trim());
-                },
-                child: const Text('Xác nhận'),
-              ),
-            ],
-          ),
+          builder: (dialogContext) => _OTPVerifyDialog(phone: phone),
         );
-        otp.dispose();
         if (smsCode == null || !mounted) return;
+
+        showLoading('Đang xác thực mã OTP...');
         idToken = await phoneAuth.verifyCode(verificationID, smsCode);
+        dismissLoading();
       }
+
+      if (!mounted) return;
+      showLoading('Đang cập nhật mật khẩu mới...');
 
       await AuthService().changePassword(
         draft.oldPassword,
         draft.newPassword,
         idToken,
       );
-      if (mounted) await widget.onLogout();
+      dismissLoading();
+
+      if (mounted) {
+        showMessage(
+          context,
+          'Đổi mật khẩu thành công. Vui lòng đăng nhập lại!',
+        );
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) await widget.onLogout();
+      }
     } on ApiException catch (error) {
+      dismissLoading();
       if (mounted) showMessage(context, error.message, error: true);
+    } finally {
+      dismissLoading();
     }
   }
 
@@ -1883,6 +2378,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) => AsyncPage(
     loading: loading,
     error: error,
+    onRetry: load,
     child: ListView(
       children: [
         PageTitle(
@@ -2052,9 +2548,21 @@ class TransactionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final incoming = tx['direction'] == 'IN';
+    final type = tx['type']?.toString() ?? '';
     final counterparty = tx['counterparty_name']?.toString() ?? '';
     final color = incoming ? const Color(0xFF68D391) : Colors.white;
     final amount = money(tx['amount'], tx['currency']?.toString() ?? 'VND');
+    final title = switch (type) {
+      'SAVINGS_DEPOSIT' => 'Gửi tiết kiệm',
+      'SAVINGS_INTEREST' => 'Lãi tiền gửi tiết kiệm',
+      'SAVINGS_MATURITY' => 'Tất toán sổ tiết kiệm',
+      'SAVINGS_EARLY_INTEREST' => 'Lãi rút tiết kiệm trước hạn',
+      'SAVINGS_EARLY_WITHDRAWAL' => 'Rút tiết kiệm trước hạn',
+      _ when counterparty.isNotEmpty => counterparty,
+      _ when tx['description']?.toString().isNotEmpty == true =>
+        tx['description'].toString(),
+      _ => type.isEmpty ? 'Giao dịch' : type,
+    };
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
@@ -2062,20 +2570,14 @@ class TransactionTile extends StatelessWidget {
         backgroundColor: color.withValues(alpha: .12),
         foregroundColor: color,
         child: Icon(
-          incoming
-              ? Icons.south_west_rounded
-              : tx['type'] == 'SAVINGS_DEPOSIT'
+          type.startsWith('SAVINGS_')
               ? Icons.savings_outlined
+              : incoming
+              ? Icons.south_west_rounded
               : Icons.north_east_rounded,
         ),
       ),
-      title: Text(
-        counterparty.isNotEmpty
-            ? counterparty
-            : tx['description']?.toString().isNotEmpty == true
-            ? tx['description'].toString()
-            : tx['type']?.toString() ?? 'Giao dịch',
-      ),
+      title: Text(title),
       subtitle: Text(
         '${tx['description'] ?? ''}\n${dateTimeText(tx['created_at'])}',
         maxLines: 2,
@@ -2107,6 +2609,200 @@ class _DetailRow extends StatelessWidget {
         ),
         Expanded(child: SelectableText(value?.toString() ?? '—')),
       ],
+    ),
+  );
+}
+
+class _PasswordChangeDialog extends StatefulWidget {
+  const _PasswordChangeDialog();
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  final old = TextEditingController();
+  final next = TextEditingController();
+  final confirm = TextEditingController();
+
+  @override
+  void dispose() {
+    old.dispose();
+    next.dispose();
+    confirm.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Đổi mật khẩu'),
+    content: SizedBox(
+      width: 400,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: old,
+            obscureText: true,
+            decoration: fieldDecoration('Mật khẩu hiện tại'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: next,
+            obscureText: true,
+            decoration: fieldDecoration('Mật khẩu mới'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: confirm,
+            obscureText: true,
+            decoration: fieldDecoration('Nhập lại mật khẩu mới'),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Sau bước này, mã OTP sẽ được gửi tới số điện thoại của bạn.',
+            style: TextStyle(color: Color(0xFF9BA8C7), fontSize: 12),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Hủy'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (old.text.isEmpty) {
+            showMessage(
+              context,
+              'Vui lòng nhập mật khẩu hiện tại',
+              error: true,
+            );
+            return;
+          }
+          if (next.text.length < 8) {
+            showMessage(
+              context,
+              'Mật khẩu mới phải có ít nhất 8 ký tự',
+              error: true,
+            );
+            return;
+          }
+          if (next.text != confirm.text) {
+            showMessage(context, 'Mật khẩu nhập lại không khớp', error: true);
+            return;
+          }
+          Navigator.pop(context, _PasswordChangeDraft(old.text, next.text));
+        },
+        child: const Text('Gửi mã OTP'),
+      ),
+    ],
+  );
+}
+
+class _OTPVerifyDialog extends StatefulWidget {
+  const _OTPVerifyDialog({required this.phone});
+
+  final String phone;
+
+  @override
+  State<_OTPVerifyDialog> createState() => _OTPVerifyDialogState();
+}
+
+class _OTPVerifyDialogState extends State<_OTPVerifyDialog> {
+  final otp = TextEditingController();
+
+  @override
+  void dispose() {
+    otp.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Xác nhận OTP'),
+    content: SizedBox(
+      width: 400,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Nhập mã gồm 6 số đã gửi tới ${_maskPhone(widget.phone)}.',
+            style: const TextStyle(color: Color(0xFF9BA8C7)),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: otp,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: fieldDecoration('Mã OTP').copyWith(
+              counterText: '',
+              prefixIcon: const Icon(Icons.sms_outlined),
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Hủy'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!RegExp(r'^\d{6}$').hasMatch(otp.text.trim())) {
+            showMessage(context, 'Mã OTP phải gồm đúng 6 số', error: true);
+            return;
+          }
+          Navigator.pop(context, otp.text.trim());
+        },
+        child: const Text('Xác nhận'),
+      ),
+    ],
+  );
+}
+
+class _LoadingDialog extends StatelessWidget {
+  const _LoadingDialog({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    backgroundColor: Colors.transparent,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151D31),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x337C83FD)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: Color(0xFF7C83FD),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
